@@ -1,0 +1,25 @@
+[tool.poetry]
+name = "rlwizard"
+version = "0.1.0"
+description = "Toolbox for training RL agents"
+authors = ["Cem Alpturk <cem.alpturk@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "~3.10"
+numpy = "^1.26.4"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.1.1"
+flake8 = "^7.0.0"
+black = "^24.2.0"
+isort = "^5.13.2"
+
+[tool.black]
+line-length = 90
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

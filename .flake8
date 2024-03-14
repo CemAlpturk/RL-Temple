@@ -1,0 +1,15 @@
+[flake8]
+select = B,C,E,F,P,T4,W,B9
+max-line-length = 90
+ignore = W503, B905, E203, E501
+extend-ignore=E203
+exclude =
+    .git,
+    __pycache__,
+    assets,
+    data,
+    .venv,
+    .vscode,
+    legacy,
+per-file-ignores =
+    */__init__.py: F401
