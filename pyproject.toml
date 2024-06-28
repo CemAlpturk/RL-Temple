@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "rlwizard"
+name = "temple"
 version = "0.1.0"
 description = "Toolbox for training RL agents"
 authors = ["Cem Alpturk <cem.alpturk@gmail.com>"]
@@ -7,14 +7,20 @@ license = "MIT"
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "~3.10"
+python = "~3.11"
 numpy = "^1.26.4"
+gymnasium = "^0.29.1"
+pygame = "^2.6.0"
+torch = "^2.3.1"
+wandb = "^0.17.3"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.1.1"
 flake8 = "^7.0.0"
 black = "^24.2.0"
 isort = "^5.13.2"
+ipykernel = "^6.29.4"
+ipython = "^8.26.0"
 
 [tool.black]
 line-length = 90
