@@ -29,9 +29,6 @@ class SnakeEnv(gym.Env):
         # Reward range
         self.reward_range = (-1, 10)
 
-        # Maximum number of steps before the game is terminated
-        self._max_steps = 1000
-
         assert render_mode is None or render_mode in self.metadata["render_modes"]
         self.render_mode = render_mode
 
@@ -46,13 +43,25 @@ class SnakeEnv(gym.Env):
         self._food_color = (255, 0, 0)
 
     def _get_obs(self) -> np.ndarray:
+        """
+        Generate observation from the current state of the environment.
+
+        Returns:
+            np.ndarray: Observation of the environment.
+        """
         obs = np.zeros((self.size, self.size), dtype=np.uint8)
+
+        # Snake body
         for x, y in self._snake:
             obs[x, y] = 2
-        obs[self._snake[0][0], self._snake[0][1]] = 1  # Head of the snake
+
+        # Head of the snake
+        obs[self._snake[0][0], self._snake[0][1]] = 1
+
+        # Food
         obs[self._food[1], self._food[0]] = 3
 
-        # Wall piece
+        # Walls
         obs[0, :] = 4
         obs[-1, :] = 4
         obs[:, 0] = 4
@@ -61,6 +70,12 @@ class SnakeEnv(gym.Env):
         return obs
 
     def _get_info(self) -> dict[str, Any]:
+        """
+        Get additional information about the environment.
+
+        Returns:
+            dict[str, Any]: Additional information about the environment.
+        """
         return {}
 
     def reset(
@@ -78,7 +93,6 @@ class SnakeEnv(gym.Env):
         self._food = self._place_food()
 
         self._terminated = False
-        self._it = 0
 
         observation = self._get_obs()
         info = self._get_info()
@@ -89,6 +103,12 @@ class SnakeEnv(gym.Env):
         return observation, info
 
     def _place_food(self) -> tuple[int, int]:
+        """
+        Places the food at a random location within the snake environment.
+
+        Returns:
+            tuple[int, int]: Coordinates of the placed food.
+        """
         # FIXME: Potential infinite loop
         while True:
             # Place food at a random location between walls
@@ -142,13 +162,9 @@ class SnakeEnv(gym.Env):
                 reward = 0
                 self._snake.pop()
 
-        self._it += 1
-        truncated = False
-        if self._it >= self._max_steps:
-            truncated = True
-
         observation = self._get_obs()
         info = self._get_info()
+        truncated = False
 
         if self.render_mode == "human":
             self._render_frame()
@@ -160,6 +176,13 @@ class SnakeEnv(gym.Env):
             return self._render_frame()
 
     def _render_frame(self) -> np.ndarray | None:
+        """
+        Renders a single frame of the snake game environment.
+
+        Returns:
+            np.ndarray | None: If the render mode is "human", returns None. If the render mode is not "human",
+            returns the rendered frame as a numpy array with shape (window_size, window_size, 3).
+        """
         if self.window is None and self.render_mode == "human":
             pygame.init()
             pygame.display.init()
