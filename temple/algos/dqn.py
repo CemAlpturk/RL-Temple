@@ -279,31 +279,32 @@ class DQNAgent:
         return episode_rewards, episode_steps
 
     def record_episode(self) -> None:
-        env: gym.Env = self.env_fn(render_mode="rgb_array")
+        env: gym.Env = self.env_fn(render_mode="rgb_array_list")
         self.policy.eval()
         reward = 0
         state, _ = env.reset()
-        frames = [env.render()]
         for step in range(self.max_steps_per_episode):
             action = self.choose_action(state, training=False)
             next_state, r, done, _, _ = env.step(action)
             reward += r
-            frames.append(env.render())
             if done:
                 break
             state = next_state
 
-        env.close()
+        frames = env.render()  # (T, H, W, C)
+
         # Convert to (N, T, C, H, W)
-        frames = (
-            torch.tensor(np.array(frames), dtype=torch.uint8).transpose(1, 3).unsqueeze(0)
-        )
+        frames = torch.tensor(
+            np.array(frames).transpose(0, 3, 1, 2),
+            dtype=torch.uint8,
+        ).unsqueeze(0)
         self.logger.log_video(
             tag="episode",
             vid_tensor=frames,
             global_step=self.global_step,
-            fps=4,
+            fps=env.metadata["render_fps"],
         )
+        env.close()
 
     def save(self) -> dict:
         return self.policy.save()
