@@ -1,10 +1,10 @@
+import gymnasium
 import numpy as np
-from gymnasium import Env, ObservationWrapper, spaces, RewardWrapper
+from gymnasium import Env, ObservationWrapper, spaces
 
 import torch.nn as nn
 
 from temple.algos.dqn import DQNAgent
-from temple.environments.snake_env import SnakeEnv
 
 
 class AddChannelToObs(ObservationWrapper):
@@ -22,16 +22,9 @@ class AddChannelToObs(ObservationWrapper):
         return observation[None, :]
 
 
-class RewardShaping(RewardWrapper):
-    def __init__(self, env: Env):
-        super().__init__(env)
-
-    def reward(self, reward):
-        return reward
-
-
 def env_fn(render_mode=None):
-    return AddChannelToObs(SnakeEnv(render_mode=render_mode))
+    env = gymnasium.make("temple/Snake-v0", render_mode=render_mode)
+    return AddChannelToObs(env)
 
 
 def main():
@@ -98,7 +91,6 @@ def main():
             action = agent.choose_action(state, training=False)
             next_state, reward, done, _, _ = env.step(action)
             state = next_state
-            env.render()
             step += 1
 
 

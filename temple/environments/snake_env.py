@@ -15,8 +15,8 @@ class SnakeEnv(gym.Env):
         self.window_size = 500  # Size of the PyGame window
 
         # Action space
-        # 0: left, 1: up, 2: right, 3: down
-        self.action_space = spaces.Discrete(4)
+        # 0: left, 1: up, 2: right, 3: down, 4: no-op
+        self.action_space = spaces.Discrete(5)
 
         # Observation space is a 2D grid of size (size, size)
         self.observation_space = spaces.Box(
@@ -134,6 +134,9 @@ class SnakeEnv(gym.Env):
             self._direction = 2 if self._direction != 0 else self._direction
         elif action == 3:  # down
             self._direction = 3 if self._direction != 1 else self._direction
+        elif action == 4:  # no-op
+            # No change in direction
+            pass
 
         # Move snake
         head_x, head_y = self._snake[0]
@@ -278,17 +281,3 @@ class SnakeEnv(gym.Env):
         if self.window is not None:
             pygame.display.quit()
             pygame.quit()
-
-
-if __name__ == "__main__":
-
-    env = SnakeEnv(render_mode="human")
-    env.reset()
-
-    for _ in range(50):
-        action = env.action_space.sample()  # Random action
-        obs, reward, terminated, _, info = env.step(action)
-        if terminated:
-            env.reset()
-
-    env.close()
