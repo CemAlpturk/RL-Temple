@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "rl_temple"
-version = "0.0.1"
+version = "0.0.1-alpha"
 description = "Toolbox for training RL agents"
 authors = ["Cem Alpturk <cem.alpturk@gmail.com>"]
 license = "MIT"
