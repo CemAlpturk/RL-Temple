@@ -93,8 +93,7 @@ class DQNAgent:
         batch_size: int = 64,
         memory_size: int = 10000,
         target_update: int = 1000,
-        max_steps_per_episode: int = 1000,
-        n_episodes: int = 1000,
+        max_steps: int = int(1e6),
         n_eval_episodes: int = 10,
         eval_interval: int = 100,
         train_per_step: int = 1,
@@ -127,13 +126,11 @@ class DQNAgent:
         # TODO: Learning rate scheduler
         self.optimizer = optim.Adam(self.policy.parameters(), lr=learning_rate)
 
-        self.max_steps_per_episode = max_steps_per_episode
-        self.n_episodes = n_episodes
+        self.max_steps = max_steps
         self.n_eval_episodes = n_eval_episodes
         self.train_per_step = train_per_step
         self.eval_interval = eval_interval
         self.record_env_interval = record_env_interval
-        self.global_step = 0
 
         # Logging
         self.logger = TensorboardLogger(log_dir)
@@ -184,73 +181,79 @@ class DQNAgent:
     def train(self):
         self.policy.train()
 
-        env = self.env_fn()
+        env: gym.Env = self.env_fn()
+        episode_reward = 0
+        episode_steps = 0
+        n_episodes = 0
+        state, _ = env.reset()
+        pbar = tqdm(total=self.max_steps, desc="Training")
+        for step in range(self.max_steps):
+            act = self.choose_action(state)
+            next_state, reward, terminated, truncated, _ = env.step(act)
+            self.memory.append(Transition(state, act, reward, next_state, terminated))
+            done = terminated or truncated
 
-        pbar = tqdm(total=self.n_episodes, desc="Training")
-        for episode in range(self.n_episodes):
-            episode_reward = 0
-            state, _ = env.reset()
-            for step in range(self.max_steps_per_episode):
-                act = self.choose_action(state)
-                next_state, reward, done, _, _ = env.step(act)
-                self.memory.append(Transition(state, act, reward, next_state, done))
+            state = next_state
 
-                if self.global_step % self.train_per_step == 0:
-                    self.learn()
+            if step % self.train_per_step == 0:
+                self.learn()
 
-                self.global_step += 1
-                episode_reward += reward
+            episode_reward += reward
+            episode_steps += 1
 
-                if self.global_step % self.target_update == 0:
-                    self.policy.update_target()
+            if step % self.target_update == 0:
+                self.policy.update_target()
 
-                if self.global_step % self.eval_interval == 0:
-                    eval_rewards, eval_steps = self.eval()
+            if step % self.eval_interval == 0:
+                eval_rewards, eval_steps = self.eval()
 
-                    # Log evaluation stats
-                    self.logger.log_scalar(
-                        tag="eval/mean_reward",
-                        scalar_value=np.mean(eval_rewards),
-                        global_step=self.global_step,
-                    )
-                    self.logger.log_scalar(
-                        tag="eval/mean_steps",
-                        scalar_value=np.mean(eval_steps),
-                        global_step=self.global_step,
-                    )
+                # Log evaluation stats
+                self.logger.log_scalar(
+                    tag="eval/mean_reward",
+                    scalar_value=np.mean(eval_rewards),
+                    global_step=step,
+                )
+                self.logger.log_scalar(
+                    tag="eval/mean_steps",
+                    scalar_value=np.mean(eval_steps),
+                    global_step=step,
+                )
+                desc = f"Eval mean reward: {np.mean(eval_rewards):.4f}, Eval median steps: {np.median(eval_steps)}"
+                pbar.set_description(desc)
 
-                if self.global_step % self.record_env_interval == 0:
-                    self.record_episode()
+            if step % self.record_env_interval == 0:
+                self.record_episode()
 
-                if done:
-                    # Log episode stats
-                    self.logger.log_scalar(
-                        tag="train/episode_reward",
-                        scalar_value=episode_reward,
-                        global_step=self.global_step,
-                    )
-                    self.logger.log_scalar(
-                        tag="train/episode_steps",
-                        scalar_value=step,
-                        global_step=self.global_step,
-                    )
-                    self.logger.log_scalar(
-                        tag="train/epsilon",
-                        scalar_value=self.epsilon,
-                        global_step=self.global_step,
-                    )
-                    self.logger.log_scalar(
-                        tag="train/episode",
-                        scalar_value=episode,
-                        global_step=self.global_step,
-                    )
+            if done:
+                n_episodes += 1
 
-                    break
+                # Log episode stats
+                self.logger.log_scalar(
+                    tag="train/episode_reward",
+                    scalar_value=episode_reward,
+                    global_step=step,
+                )
+                self.logger.log_scalar(
+                    tag="train/episode_steps",
+                    scalar_value=episode_steps,
+                    global_step=step,
+                )
+                self.logger.log_scalar(
+                    tag="train/epsilon",
+                    scalar_value=self.epsilon,
+                    global_step=step,
+                )
+                self.logger.log_scalar(
+                    tag="train/episode",
+                    scalar_value=n_episodes,
+                    global_step=step,
+                )
 
-                state = next_state
+                # Reset episode stats
+                episode_reward = 0
+                episode_steps = 0
+                state, _ = env.reset()
 
-            desc = f"Episode reward: {episode_reward:.4f}, Episode steps: {step}"
-            pbar.set_description(desc)
             pbar.update(1)
 
         pbar.close()
@@ -258,37 +261,39 @@ class DQNAgent:
         self.logger.close()
 
     def eval(self):
-        env = self.env_fn()
+        env: gym.Env = self.env_fn()
         self.policy.eval()
         episode_rewards = []
         episode_steps = []
         for _ in range(self.n_eval_episodes):
             state, _ = env.reset()
             episode_reward = 0
-            for step in range(self.max_steps_per_episode):
+            done = False
+            step = 0
+            while not done:
                 act = self.choose_action(state, training=False)
-                next_state, reward, done, _, _ = env.step(act)
+                next_state, reward, terminated, truncated, _ = env.step(act)
+                done = terminated or truncated
                 episode_reward += reward
-                if done:
-                    break
                 state = next_state
+                step += 1
             episode_rewards.append(episode_reward)
             episode_steps.append(step)
 
         env.close()
         return episode_rewards, episode_steps
 
-    def record_episode(self) -> None:
+    def record_episode(self, step: int) -> None:
         env: gym.Env = self.env_fn(render_mode="rgb_array_list")
         self.policy.eval()
         reward = 0
         state, _ = env.reset()
-        for step in range(self.max_steps_per_episode):
+        done = False
+        while not done:
             action = self.choose_action(state, training=False)
-            next_state, r, done, _, _ = env.step(action)
+            next_state, r, terminated, truncated, _ = env.step(action)
+            done = terminated or truncated
             reward += r
-            if done:
-                break
             state = next_state
 
         frames = env.render()  # (T, H, W, C)
@@ -301,7 +306,7 @@ class DQNAgent:
         self.logger.log_video(
             tag="episode",
             vid_tensor=frames,
-            global_step=self.global_step,
+            global_step=step,
             fps=env.metadata["render_fps"],
         )
         env.close()
