@@ -4,7 +4,7 @@ from gymnasium import Env, ObservationWrapper, spaces
 
 import torch.nn as nn
 
-from temple.algos.dqn import DQNAgent
+from rl_temple.algos.dqn import DQNAgent
 
 
 class AddChannelToObs(ObservationWrapper):
@@ -23,7 +23,7 @@ class AddChannelToObs(ObservationWrapper):
 
 
 def env_fn(render_mode=None):
-    env = gymnasium.make("temple/Snake-v0", render_mode=render_mode)
+    env = gymnasium.make("rl_temple/Snake-v0", render_mode=render_mode)
     return AddChannelToObs(env)
 
 

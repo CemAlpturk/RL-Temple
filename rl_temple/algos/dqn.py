@@ -13,7 +13,7 @@ from copy import deepcopy
 from tqdm import tqdm
 
 # from temple.models import make_model
-from temple.logging import TensorboardLogger
+from rl_temple.logging import TensorboardLogger
 
 
 class Transition(NamedTuple):
@@ -222,7 +222,7 @@ class DQNAgent:
                 pbar.set_description(desc)
 
             if step % self.record_env_interval == 0:
-                self.record_episode()
+                self.record_episode(step)
 
             if done:
                 n_episodes += 1
