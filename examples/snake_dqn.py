@@ -62,20 +62,19 @@ def main():
 
     agent = DQNAgent(
         env_fn=env_fn,
-        # model_config=model_config,
+        # model_config=model_config,]
         model=model,
         learning_rate=0.001,
         gamma=0.97,
         epsilon=1.0,
-        epsilon_delta=1e-5,
+        epsilon_delta=5e-6,
         epsilon_min=0.01,
         batch_size=32,
         memory_size=50000,
         target_update=1000,
-        max_steps_per_episode=1000,
-        n_episodes=20000,
-        n_eval_episodes=10,
-        eval_interval=100,
+        max_steps=int(2e6),
+        n_eval_episodes=20,
+        eval_interval=1000,
         train_per_step=1,
         record_env_interval=10000,
     )
@@ -87,9 +86,10 @@ def main():
         state, _ = env.reset()
         step = 0
         done = False
-        while not done and step < 100:
+        while not done:
             action = agent.choose_action(state, training=False)
-            next_state, reward, done, _, _ = env.step(action)
+            next_state, reward, terminated, truncated, _ = env.step(action)
+            done = terminated or truncated
             state = next_state
             step += 1
 
