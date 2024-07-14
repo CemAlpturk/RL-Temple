@@ -101,7 +101,6 @@ class DQNAgent:
         log_dir: str | None = None,
     ) -> None:
         self.env = env
-        self.state_size = env.observation_space.shape[0]
 
         assert isinstance(
             env.action_space, gym.spaces.Discrete

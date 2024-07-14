@@ -1,35 +1,17 @@
-import functools
-
-import gymnasium
-import numpy as np
-from gymnasium import Env, ObservationWrapper, spaces
+import gymnasium as gym
 
 import torch.nn as nn
 
 from rl_temple.algos.dqn import DQNAgent
-
-
-class AddChannelToObs(ObservationWrapper):
-    def __init__(self, env):
-        super().__init__(env)
-        shape = self.observation_space.shape
-        self.observation_space = spaces.Box(
-            low=0,
-            high=4,
-            shape=(1, *shape),
-            dtype=np.int32,
-        )
-
-    def observation(self, observation):
-        return observation[None, :]
+from rl_temple.wrappers import ChannelAddedObservation
 
 
 def main():
-    env = gymnasium.make("rl_temple/Snake-v0")
-    env = AddChannelToObs(env)
+    env = gym.make("rl_temple/Snake-v0")
+    env = ChannelAddedObservation(env)
 
-    test_env = gymnasium.make("rl_temple/Snake-v0", render_mode="rgb_array_list")
-    test_env = AddChannelToObs(test_env)
+    test_env = gym.make("rl_temple/Snake-v0", render_mode="rgb_array_list")
+    test_env = ChannelAddedObservation(test_env)
 
     model = nn.Sequential(
         nn.Conv2d(1, 64, 4),
@@ -44,7 +26,6 @@ def main():
 
     agent = DQNAgent(
         env=env,
-        # model_config=model_config,]
         model=model,
         test_env=test_env,
         learning_rate=0.001,
@@ -64,8 +45,8 @@ def main():
 
     agent.train()
 
-    env = gymnasium.make("rl_temple/Snake-v0", render_mode="human")
-    env = AddChannelToObs(env)
+    env = gym.make("rl_temple/Snake-v0", render_mode="human")
+    env = ChannelAddedObservation(env)
 
     while True:
         state, _ = env.reset()
