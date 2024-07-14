@@ -1,3 +1,5 @@
+import functools
+
 import gymnasium
 import numpy as np
 from gymnasium import Env, ObservationWrapper, spaces
@@ -22,23 +24,12 @@ class AddChannelToObs(ObservationWrapper):
         return observation[None, :]
 
 
-def env_fn(render_mode=None):
-    env = gymnasium.make("rl_temple/Snake-v0", render_mode=render_mode)
-    return AddChannelToObs(env)
-
-
 def main():
-    env = env_fn()
-    # model_config = {
-    #     "type": "mlp",
-    #     "args": {
-    #         "input_size": env.observation_space.shape[0],
-    #         "output_size": env.action_space.n,
-    #         "hidden_sizes": [64, 64],
-    #         "activation": "relu",
-    #         "final_activation": None,
-    #     },
-    # }
+    env = gymnasium.make("rl_temple/Snake-v0")
+    env = AddChannelToObs(env)
+
+    test_env = gymnasium.make("rl_temple/Snake-v0", render_mode="rgb_array_list")
+    test_env = AddChannelToObs(test_env)
 
     model = nn.Sequential(
         nn.Conv2d(1, 64, 4),
@@ -48,22 +39,14 @@ def main():
         nn.ReLU(),
         nn.MaxPool2d(2, 1),
         nn.Flatten(),
-        # nn.Linear(64 * 2 * 2, 256),
-        # nn.ReLU(),
         nn.Linear(64, env.action_space.n),
     )
-    # model = nn.Sequential(
-    #     nn.Linear(env.observation_space.shape[0], 64),
-    #     nn.ReLU(),
-    #     nn.Linear(64, 64),
-    #     nn.ReLU(),
-    #     nn.Linear(64, env.action_space.n),
-    # )
 
     agent = DQNAgent(
-        env_fn=env_fn,
+        env=env,
         # model_config=model_config,]
         model=model,
+        test_env=test_env,
         learning_rate=0.001,
         gamma=0.97,
         epsilon=1.0,
@@ -81,7 +64,9 @@ def main():
 
     agent.train()
 
-    env = env_fn("human")
+    env = gymnasium.make("rl_temple/Snake-v0", render_mode="human")
+    env = AddChannelToObs(env)
+
     while True:
         state, _ = env.reset()
         step = 0

@@ -7,7 +7,7 @@ import gymnasium as gym
 
 import random
 from collections import deque
-from typing import NamedTuple, Callable
+from typing import NamedTuple
 from copy import deepcopy
 
 from tqdm import tqdm
@@ -82,9 +82,9 @@ class DQNPolicy(nn.Module):
 class DQNAgent:
     def __init__(
         self,
-        env_fn: Callable[[str | None], gym.Env],
-        # model_config: dict[str, Any],
+        env: gym.Env,
         model: nn.Module,
+        test_env: gym.Env | None = None,
         learning_rate: float = 0.001,
         gamma: float = 0.99,
         epsilon: float = 1.0,
@@ -100,13 +100,19 @@ class DQNAgent:
         record_env_interval: int = 10000,
         log_dir: str | None = None,
     ) -> None:
-        self.env_fn = env_fn
-        env: gym.Env = env_fn()
+        self.env = env
         self.state_size = env.observation_space.shape[0]
-        self.action_size = env.action_space.n
-        env.close()
 
-        # self.device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+        assert isinstance(
+            env.action_space, gym.spaces.Discrete
+        ), "Only Discrete action spaces are supported"
+        self.action_size = env.action_space.n
+
+        if test_env is None:
+            self.test_env = deepcopy(env)
+        else:
+            self.test_env = test_env
+
         self.device = torch.device("cpu")
         self.policy = DQNPolicy(model).to(self.device)
         self.policy.update_target()
@@ -115,7 +121,6 @@ class DQNAgent:
 
         self.gamma = gamma
 
-        # TODO: Epsilon scheduler
         self.epsilon = epsilon
         self.epsilon_delta = epsilon_delta
         self.epsilon_min = epsilon_min
@@ -181,15 +186,14 @@ class DQNAgent:
     def train(self):
         self.policy.train()
 
-        env: gym.Env = self.env_fn()
         episode_reward = 0
         episode_steps = 0
         n_episodes = 0
-        state, _ = env.reset()
+        state, _ = self.env.reset()
         pbar = tqdm(total=self.max_steps, desc="Training")
         for step in range(self.max_steps):
             act = self.choose_action(state)
-            next_state, reward, terminated, truncated, _ = env.step(act)
+            next_state, reward, terminated, truncated, _ = self.env.step(act)
             self.memory.append(Transition(state, act, reward, next_state, terminated))
             done = terminated or truncated
 
@@ -252,27 +256,27 @@ class DQNAgent:
                 # Reset episode stats
                 episode_reward = 0
                 episode_steps = 0
-                state, _ = env.reset()
+                state, _ = self.env.reset()
 
             pbar.update(1)
 
         pbar.close()
-        env.close()
+        self.env.close()
+        self.test_env.close()
         self.logger.close()
 
     def eval(self):
-        env: gym.Env = self.env_fn()
         self.policy.eval()
         episode_rewards = []
         episode_steps = []
         for _ in range(self.n_eval_episodes):
-            state, _ = env.reset()
+            state, _ = self.test_env.reset()
             episode_reward = 0
             done = False
             step = 0
             while not done:
                 act = self.choose_action(state, training=False)
-                next_state, reward, terminated, truncated, _ = env.step(act)
+                next_state, reward, terminated, truncated, _ = self.test_env.step(act)
                 done = terminated or truncated
                 episode_reward += reward
                 state = next_state
@@ -280,23 +284,21 @@ class DQNAgent:
             episode_rewards.append(episode_reward)
             episode_steps.append(step)
 
-        env.close()
         return episode_rewards, episode_steps
 
     def record_episode(self, step: int) -> None:
-        env: gym.Env = self.env_fn(render_mode="rgb_array_list")
         self.policy.eval()
         reward = 0
-        state, _ = env.reset()
+        state, _ = self.test_env.reset()
         done = False
         while not done:
             action = self.choose_action(state, training=False)
-            next_state, r, terminated, truncated, _ = env.step(action)
+            next_state, r, terminated, truncated, _ = self.test_env.step(action)
             done = terminated or truncated
             reward += r
             state = next_state
 
-        frames = env.render()  # (T, H, W, C)
+        frames = self.test_env.render()  # (T, H, W, C)
 
         # Convert to (N, T, C, H, W)
         frames = torch.tensor(
@@ -307,9 +309,8 @@ class DQNAgent:
             tag="episode",
             vid_tensor=frames,
             global_step=step,
-            fps=env.metadata["render_fps"],
+            fps=self.test_env.metadata["render_fps"],
         )
-        env.close()
 
     def save(self) -> dict:
         return self.policy.save()
