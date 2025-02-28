@@ -39,7 +39,7 @@ class DQNPolicy(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.model(x)
 
-    @torch.no_grad
+    @torch.no_grad()
     def choose_action(self, state: np.ndarray) -> int:
         state = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
         return self.model(state).argmax().item()
@@ -259,6 +259,7 @@ class DQNAgent:
 
             pbar.update(1)
 
+        self.record_episode(step)
         pbar.close()
         self.env.close()
         self.test_env.close()

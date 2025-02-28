@@ -36,11 +36,11 @@ def main():
         batch_size=32,
         memory_size=50000,
         target_update=1000,
-        max_steps=int(2e6),
+        max_steps=int(10e6),
         n_eval_episodes=20,
-        eval_interval=1000,
+        eval_interval=10000,
         train_per_step=1,
-        record_env_interval=10000,
+        record_env_interval=50000,
     )
 
     agent.train()
