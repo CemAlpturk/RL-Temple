@@ -6,7 +6,7 @@ class BaseAgent(ABC):
     """Abstract base class for all agents."""
 
     @abstractmethod
-    def select_action(self, state: Any, explore: bool = False) -> Any:
+    def select_action(self, state: Any, explore: bool = True) -> Any:
         """
         Selects an action given a state.
         """
