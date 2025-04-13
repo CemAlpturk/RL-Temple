@@ -6,14 +6,16 @@ class BaseAgent(ABC):
     """Abstract base class for all agents."""
 
     @abstractmethod
-    def select_action(self, state: Any, explore: bool = True) -> Any:
+    def select_action(
+        self, state: Any, explore: bool = True, return_info: bool = False
+    ) -> Any:
         """
         Selects an action given a state.
         """
         pass
 
     @abstractmethod
-    def remember(self, state, action, reward, next_state, done) -> None:
+    def remember(self, state, action, reward, next_state, done, **kwargs) -> None:
         """
         Store transition in replay memory or buffer.
         """
