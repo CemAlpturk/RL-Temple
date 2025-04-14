@@ -164,4 +164,5 @@ cython_debug/
 # Tensorboard runs
 **/runs
 
-notebooks/
+notebooks/*
+!notebooks/.gitkeep
