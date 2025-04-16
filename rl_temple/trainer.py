@@ -3,6 +3,10 @@ from typing import Callable, Optional
 from tqdm import tqdm
 
 import gymnasium as gym
+from gymnasium.wrappers import RenderCollection
+
+import torch
+import numpy as np
 
 from rl_temple.runners import AgentRunner
 from rl_temple.logging.tensorboard_logger import TensorboardLogger
@@ -19,6 +23,7 @@ class Trainer:
         eval_env_fn: Optional[Callable[[], gym.Env]] = None,
         eval_interval: int = 10,
         eval_episodes: int = 5,
+        render_interval: int = 100,
     ) -> None:
         self.episode = 0
         self.runner = runner
@@ -26,9 +31,11 @@ class Trainer:
         self.env = env_fn()
         self.num_episodes = num_episodes
         self.max_steps = max_steps_per_episode
-        self.eval_env = eval_env_fn() if eval_env_fn else None
+
+        self.eval_env = RenderCollection(eval_env_fn()) if eval_env_fn else None
         self.eval_interval = eval_interval
         self.eval_episodes = eval_episodes
+        self.render_interval = render_interval
 
         self.logger = TensorboardLogger()
 
@@ -71,5 +78,21 @@ class Trainer:
             scalar_value=mean_reward,
             global_step=self.episode,
         )
+
+        if self.episode % self.render_interval == 0:
+            frames = eval_runner.env.render()  # (T, H, W, C)
+
+            # Convert to (N, T, C, H, W)
+            frames = torch.tensor(
+                np.array(frames).transpose(0, 3, 1, 2),
+                dtype=torch.uint8,
+            ).unsqueeze(0)
+
+            self.logger.log_video(
+                tag="episode",
+                vid_tensor=frames,
+                global_step=self.episode,
+                fps=eval_runner.env.metadata["render_fps"],
+            )
 
         return mean_reward
