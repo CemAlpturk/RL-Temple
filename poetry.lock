@@ -12,6 +12,41 @@ files = [
 ]
 
 [[package]]
+name = "ale-py"
+version = "0.10.2"
+description = "The Arcade Learning Environment (ALE) - a platform for AI research."
+optional = false
+python-versions = ">=3.9"
+files = [
+    {file = "ale_py-0.10.2-cp310-cp310-macosx_10_15_x86_64.whl", hash = "sha256:9659a0926f2e25a776fc9daab79e5f398096466f5a079caef370369d38309429"},
+    {file = "ale_py-0.10.2-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:ef90b4416807b35a3a701548a8e5c1ef54bb4728665c4a74275de64ef41ff11f"},
+    {file = "ale_py-0.10.2-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:cba2a904ab80670b9db8965d95dad3d978b4a133595c04b1be42f86c0371fdde"},
+    {file = "ale_py-0.10.2-cp310-cp310-win_amd64.whl", hash = "sha256:13764f641117c5c4d629272aa303ef5ad21a75870318245d2e39d5fb5afac73b"},
+    {file = "ale_py-0.10.2-cp311-cp311-macosx_10_15_x86_64.whl", hash = "sha256:389440a842678041e4fccca9be3f4da3426e2eac64c7c53c2e7a7de9e73cbdc9"},
+    {file = "ale_py-0.10.2-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:4cbd01bce19c8fcfa109537ee461932e5b3bc3bf2d832072e2670ca6cb5912a1"},
+    {file = "ale_py-0.10.2-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:3b4f7f03e9ff18cc545f691105fb32a3ac5381543a97237ef8d2bdb6a38b7b4a"},
+    {file = "ale_py-0.10.2-cp311-cp311-win_amd64.whl", hash = "sha256:b1fab6fdf3b8f2e958427f1aecfce6aa29b9acb634882c365dbb953f1f93e4d3"},
+    {file = "ale_py-0.10.2-cp312-cp312-macosx_10_15_x86_64.whl", hash = "sha256:fe65028081b233572c143b58d5e3427c9a0f58dbee8367b2c9c658a1b9dae5e0"},
+    {file = "ale_py-0.10.2-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:791f68cb665d8ddd1c3afa2eb0ce47a9441c8af2fad03abfd8f9bc0d7772650d"},
+    {file = "ale_py-0.10.2-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:744f623829d5bd8b105aac428249c27472fdf53f3822a3ceadea3c8cab27b161"},
+    {file = "ale_py-0.10.2-cp312-cp312-win_amd64.whl", hash = "sha256:d5312b5a2be4867ea25152b68896651a8ed514ffbf221b1c7d3f6141d9009087"},
+    {file = "ale_py-0.10.2-cp313-cp313-macosx_10_15_x86_64.whl", hash = "sha256:4f1af4da243bd369cd74296b32fd952b27f72e5f55fcd090caf06b93e15608e3"},
+    {file = "ale_py-0.10.2-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:7649911c311649b2dcfa4046d549b3f5cb5d8fc354fee01a73bd7762d97572a0"},
+    {file = "ale_py-0.10.2-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:e68297eda2681f8b5591c251a617c19c20a1e1af6a7d06ca1e32e6cca7fcede5"},
+    {file = "ale_py-0.10.2-cp313-cp313-win_amd64.whl", hash = "sha256:6e057557bbc13bf6eff2797a09070755d69d6fb9e54733e11a5e612fdf60117f"},
+    {file = "ale_py-0.10.2-cp39-cp39-macosx_10_15_x86_64.whl", hash = "sha256:be9c877ae53ab455c3d3639481e439df5c4b1e3312482f1efcd64e40d5d924ee"},
+    {file = "ale_py-0.10.2-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:62029caaed2cb09381b3d8ca488ad7ac8a0d8e1193bb5f6e1ff75a8cd4d14634"},
+    {file = "ale_py-0.10.2-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:88248f41463f0f05095aa58d45212e6948151fd86d885e3d655aaeb69e95e9b3"},
+    {file = "ale_py-0.10.2-cp39-cp39-win_amd64.whl", hash = "sha256:813c38da130dd6d4c91980f2fd8060d10ca8b52054677af1a41f8bcc97c22072"},
+]
+
+[package.dependencies]
+numpy = ">1.20"
+
+[package.extras]
+test = ["gymnasium (>=1.0.0)", "pytest (>=7.0)"]
+
+[[package]]
 name = "appnope"
 version = "0.1.4"
 description = "Disable App Nap on macOS >= 10.9"
@@ -2902,4 +2937,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.0"
 python-versions = "~3.11"
-content-hash = "e19e18b66082039c11830de6d5865a53de6cd92272ae1b1a61a40fe4cee6cd3b"
+content-hash = "77ee460371e24b1a7e6285e26ac0c62d532bbe315c12339881b0ad5e8d2db6a3"
