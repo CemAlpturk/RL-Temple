@@ -51,9 +51,9 @@ class VPGAgent(BaseAgent):
         act, value, logprob = self.model.step(state_t)
 
         if return_info:
-            return act.item(), (logprob.item(), value.item())
+            return act.cpu().numpy()[0], (logprob.item(), value.item())
 
-        return act.item()
+        return act.cpu().numpy()[0]
 
     def remember(
         self,
@@ -77,9 +77,8 @@ class VPGAgent(BaseAgent):
 
     def _learn(self) -> None:
         states, actions, rewards, log_probs_old, values, dones = self.buffer.get()
-
         states = torch.tensor(np.array(states), dtype=torch.float32, device=self.device)
-        actions = torch.tensor(actions, dtype=torch.int64, device=self.device)
+        actions = torch.tensor(np.array(actions), device=self.device)
         log_probs_old = torch.tensor(
             log_probs_old, dtype=torch.float32, device=self.device
         )
