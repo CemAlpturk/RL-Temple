@@ -1,9 +1,7 @@
-from typing import Callable
-
 import torch.nn as nn
 
 
-def get_activation(activation: str | None) -> Callable:
+def get_activation(activation: str | None) -> nn.Module:
     if activation is None or activation == "identity":
         return nn.Identity()
     elif activation == "relu":
