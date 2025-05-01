@@ -1,58 +1,87 @@
-from typing import List, Tuple, Optional
+from typing import Union, Any
 import torch
 import torch.nn as nn
-from torch.nn import functional as F
 
 from .utils import get_activation
+from .mlp import MLP
 
 
-class CNN(nn.module):
+class CNN(nn.Module):
+    """
+    A general-purpose CNN builder.
+
+    Args:
+        input_channels (int): Number of channels in the input (e.g., 3 for RGB).
+        input_shape (tuple[int, int]): Height and width of extected inputs.
+        conv_layers (list[dict[str, Any]]):
+            - Dict configs defining convolutional blocks.
+        fc_layers (list[int]):
+            - Int sizes defining fully-connected blocks.
+        num_classes (int): Number of output classes.
+        activation (str): Activation class (e.g., nn.ReLU). Default: 'relu'.
+        dropout (float): Dropout probability after FC layers (only for int-style FC). Default: 0.0.
+    """
 
     def __init__(
         self,
         input_channels: int,
-        conv_layers_config: List[Tuple[int, int, Optional[int], Optional[int]]],
-        fc_layers_config: List[int],
+        input_shape: tuple[int, int],
+        conv_layers: list[dict[str, Any]],
+        fc_layers: list[int],
         num_classes: int,
-        activation: str | None = "relu",
+        activation: str = "relu",
+        dropout: float = 0.0,
     ) -> None:
         super().__init__()
+        self.activation = get_activation(activation)
+        self.dropout = dropout
 
-        self.conv_layers = nn.ModuleList()
-        self.pool_layers = nn.ModuleList()
+        layers: list[nn.Module] = []
         in_channels = input_channels
 
-        # Convolutional layers
-        for config in conv_layers_config:
-            out_channels, kernel_size, pool_kernel_size, pool_stride = config
-            self.conv_layers.append(nn.Conv2d(in_channels, out_channels, kernel_size))
-            in_channels = out_channels
+        # Conv Layers Setup
+        for cfg in conv_layers:
+            out_ch: int = cfg["out_channels"]
+            k: Union[int, tuple] = cfg.get("kernel_size", 3)
+            s: Union[int, tuple] = cfg.get("stride", 1)
+            p: Union[int, tuple] = cfg.get("padding", 0)
 
-            if pool_kernel_size is not None and pool_stride is not None:
-                self.pool_layers.append(
-                    nn.MaxPool2d(kernel_size=pool_kernel_size, stride=pool_stride)
-                )
-            else:
-                self.pool_layers.append(None)
+            layers.append(
+                nn.Conv2d(in_channels, out_ch, kernel_size=k, stride=s, padding=p)
+            )
 
-        self.fc_layers = nn.ModuleList()
-        in_features = self._calculate_conv_output(conv_layers_config)
+            if cfg.get("batch_norm", False):
+                layers.append(nn.BatchNorm2d(out_ch))
+            layers.append(self.activation)
+            pool: dict[str, Any] = cfg.get("pooling", {})
+            if pool:
+                kt: int = pool["kernel_size"]
+                st: int = pool.get("stride", kt)
+                if pool.get("type", "max") == "max":
+                    layers.append(nn.MaxPool2d(kt, stride=st))
+                else:
+                    layers.append(nn.AvgPool2d(kt, stride=st))
 
-        # Fully connected layers
-        for out_features in fc_layers_config:
-            self.fc_layers.append(nn.Linear(in_features, out_features))
-            in_features = out_features
+            in_channels = out_ch
 
-        self.output_layer = nn.Linear(in_features, num_classes)
+        self.conv = nn.Sequential(*layers)
 
-        self.activation = get_activation(activation)
+        # Determine flattened size
+        h, w = input_shape
+        with torch.no_grad():
+            dummy = torch.zeros(1, input_channels, h, w)
+            feat: torch.Tensor = self.conv(dummy)
+            flatten_dim = feat.view(1, -1).size(1)
 
-    def _calculate_conv_output(self, input_size: Tuple[int, int]) -> int:
-        x = torch.rand(1, *input_size)
-        for layer in self.conv_layers:
-            x = layer(x)
-        return x.view(1, -1).shape[1]
+        # FC Setup
+        self.fc = MLP(
+            input_size=flatten_dim,
+            output_size=num_classes,
+            hidden_sizes=fc_layers,
+            activation=activation,
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        for conv_layer in self.conv_layers:
-            x = self.activation(conv_layer(x))
+        features: torch.Tensor = self.conv(x)
+        features = features.view(features.size(0), -1)
+        return self.fc(features)
