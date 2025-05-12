@@ -161,6 +161,13 @@ class CNNGaussianActor(Actor):
         std = torch.exp(self.log_std)
         return dist.Normal(mu, std)
 
+    def _log_prob_from_distribution(
+        self,
+        pi: dist.Distribution,
+        act: torch.Tensor,
+    ) -> torch.Tensor:
+        return pi.log_prob(act).sum(dim=-1)
+
 
 class MLPCritic(nn.Module):
 
