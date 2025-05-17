@@ -1,5 +1,6 @@
 import torch
 import torch.optim as optim
+import torch.nn.functional as F
 
 import numpy as np
 
@@ -17,7 +18,6 @@ class VPGAgent(BaseAgent):
         lam: float = 0.95,
         pi_lr: float = 3e-4,
         vf_lr: float = 1e-3,
-        train_v_iters: int = 80,
         batch_size: int = 4,
         device=None,
     ) -> None:
@@ -31,15 +31,11 @@ class VPGAgent(BaseAgent):
         self.model = model
         self.model.to(self.device)
 
-        self.train_v_iters = train_v_iters
         self.batch_size = batch_size
         self.ep_count = 0
 
         self.pi_optimizer = optim.Adam(self.model.pi.parameters(), lr=pi_lr)
         self.vf_optimizer = optim.Adam(self.model.v.parameters(), lr=vf_lr)
-
-        self.pi_optimizer.zero_grad()
-        self.vf_optimizer.zero_grad()
 
         self.buffer = RolloutBuffer()
 
@@ -63,13 +59,13 @@ class VPGAgent(BaseAgent):
 
     def remember(
         self,
-        state,
-        action,
-        reward,
-        next_state,
-        done,
-        log_prob=None,
-        value=None,
+        state: np.ndarray,
+        action: np.ndarray,
+        reward: float,
+        next_state: np.ndarray,
+        done: bool,
+        log_prob: float,
+        value: float,
     ) -> None:
         self.buffer.add((state, action, reward, log_prob, value, done))
 
@@ -78,47 +74,68 @@ class VPGAgent(BaseAgent):
         pass
 
     def end_episode(self) -> dict[str, float]:
-        stats = self._learn()
-        self.buffer.clear()
-        return stats
+        self.buffer.end_episode()
+        if len(self.buffer) == self.batch_size:
+            stats = self._learn()
+            self.buffer.clear()
+            return stats
+
+        return {}
 
     def _learn(self) -> dict[str, float]:
-        states, actions, rewards, log_probs_old, values, dones = self.buffer.get()
-        states = torch.tensor(np.array(states), dtype=torch.float32, device=self.device)
-        actions = torch.tensor(np.array(actions), device=self.device)
-        log_probs_old = torch.tensor(
-            log_probs_old, dtype=torch.float32, device=self.device
-        )
-        rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device)
-        values = torch.tensor(values, dtype=torch.float32, device=self.device)
-        dones = torch.tensor(dones, dtype=torch.float32, device=self.device)
+        episodes = self.buffer.get()
 
-        returns = self._compute_rewards_to_go(rewards)
-        advantages = returns - values
+        all_states, all_actions = [], []
+        all_returns, all_advantages = [], []
 
-        # Policy loss
-        _, logp = self.model.pi(states, actions)
-        loss_pi = -(logp * advantages).mean()
-        loss_pi /= self.batch_size
-        loss_pi.backward()
+        for episode in episodes:
+            states = episode["states"]
+            actions = episode["actions"]
+            rewards = episode["rewards"]
+            values = episode["values"]
+            dones = episode["dones"]
+            states = torch.tensor(states, dtype=torch.float32, device=self.device)
+            actions = torch.tensor(actions, dtype=torch.float32, device=self.device)
+            rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device)
+            values = torch.tensor(values, dtype=torch.float32, device=self.device)
+            dones = torch.tensor(dones, dtype=torch.float32, device=self.device)
 
-        self.ep_count += 1
-        if self.ep_count % self.batch_size == 0:
-            self.pi_optimizer.step()
-            self.ep_count = 0
-            self.pi_optimizer.zero_grad()
+            returns = self._compute_rewards_to_go(rewards)
+            # Normalize returns
+            returns = (returns - returns.mean()) / (returns.std() + 1e-8)
+            advantages = returns - values
 
-        # Value loss
+            # Stash
+            all_states.append(states)
+            all_actions.append(actions)
+            all_returns.append(returns)
+            all_advantages.append(advantages)
+
+        states = torch.cat(all_states, dim=0)  # (N, *state_dim)
+        actions = torch.cat(all_actions, dim=0)  # (N, *action_dim)
+        returns = torch.cat(all_returns, dim=0)  # (N,)
+        advantages = torch.cat(all_advantages, dim=0)  # (N,)
+
+        # Update policy
+        _, log_probs = self.model.pi(states, actions)
+        policy_loss: torch.Tensor = -(log_probs * advantages).mean()
+
+        self.pi_optimizer.zero_grad()
+        policy_loss.backward()
+        self.pi_optimizer.step()
+
+        # Update value function
         returns = returns.detach()
-        for i in range(self.train_v_iters):
-            self.vf_optimizer.zero_grad()
-            loss_v = ((self.model.v(states) - returns) ** 2).mean()
-            loss_v.backward()
-            self.vf_optimizer.step()
+        value_preds = self.model.v(states).squeeze()  # (N,)
+        value_loss = F.mse_loss(value_preds, returns)
+
+        self.vf_optimizer.zero_grad()
+        value_loss.backward()
+        self.vf_optimizer.step()
 
         stats = {
-            "loss_pi": loss_pi.item(),
-            "loss_v": loss_v.item(),
+            "loss_pi": policy_loss.item(),
+            "loss_v": value_loss.item(),
         }
         return stats
 
