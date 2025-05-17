@@ -18,6 +18,7 @@ class VPGAgent(BaseAgent):
         pi_lr: float = 3e-4,
         vf_lr: float = 1e-3,
         train_v_iters: int = 80,
+        batch_size: int = 4,
         device=None,
     ) -> None:
 
@@ -31,9 +32,14 @@ class VPGAgent(BaseAgent):
         self.model.to(self.device)
 
         self.train_v_iters = train_v_iters
+        self.batch_size = batch_size
+        self.ep_count = 0
 
         self.pi_optimizer = optim.Adam(self.model.pi.parameters(), lr=pi_lr)
         self.vf_optimizer = optim.Adam(self.model.v.parameters(), lr=vf_lr)
+
+        self.pi_optimizer.zero_grad()
+        self.vf_optimizer.zero_grad()
 
         self.buffer = RolloutBuffer()
 
@@ -71,56 +77,77 @@ class VPGAgent(BaseAgent):
         # No update
         pass
 
-    def end_episode(self) -> None:
-        self._learn()
+    def end_episode(self) -> dict[str, float]:
+        stats = self._learn()
         self.buffer.clear()
+        return stats
 
-    def _learn(self) -> None:
+    def _learn(self) -> dict[str, float]:
         states, actions, rewards, log_probs_old, values, dones = self.buffer.get()
         states = torch.tensor(np.array(states), dtype=torch.float32, device=self.device)
         actions = torch.tensor(np.array(actions), device=self.device)
         log_probs_old = torch.tensor(
             log_probs_old, dtype=torch.float32, device=self.device
         )
-
-        # Rewards to go
-        # rewards_to_go = self._compute_rewards_to_go(rewards)
-        # rewards = torch.tensor(rewards_to_go, dtype=torch.float32, device=self.device)
-
-        # Advantage
-        gae = self._compute_gae(rewards, values, dones)
-        returns = torch.tensor(gae, dtype=torch.float32, device=self.device)
+        rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device)
         values = torch.tensor(values, dtype=torch.float32, device=self.device)
+        dones = torch.tensor(dones, dtype=torch.float32, device=self.device)
+
+        returns = self._compute_rewards_to_go(rewards)
         advantages = returns - values
 
         # Policy loss
-        self.pi_optimizer.zero_grad()
-        pi, logp = self.model.pi(states, actions)
+        _, logp = self.model.pi(states, actions)
         loss_pi = -(logp * advantages).mean()
+        loss_pi /= self.batch_size
         loss_pi.backward()
-        self.pi_optimizer.step()
+
+        self.ep_count += 1
+        if self.ep_count % self.batch_size == 0:
+            self.pi_optimizer.step()
+            self.ep_count = 0
+            self.pi_optimizer.zero_grad()
 
         # Value loss
+        returns = returns.detach()
         for i in range(self.train_v_iters):
             self.vf_optimizer.zero_grad()
-            loss_v = ((self.model.v(states) - advantages) ** 2).mean()
+            loss_v = ((self.model.v(states) - returns) ** 2).mean()
             loss_v.backward()
             self.vf_optimizer.step()
 
-    def _compute_rewards_to_go(self, rewards: list[float]) -> list[float]:
-        rewards_to_go = [0.0] * len(rewards)
+        stats = {
+            "loss_pi": loss_pi.item(),
+            "loss_v": loss_v.item(),
+        }
+        return stats
+
+    def _compute_rewards_to_go(self, rewards: torch.Tensor) -> torch.Tensor:
+        rewards_to_go = torch.zeros_like(rewards)
         running_sum = 0.0
         for i in reversed(range(len(rewards))):
             running_sum = rewards[i] + self.gamma * running_sum
             rewards_to_go[i] = running_sum
         return rewards_to_go
 
-    def _compute_gae(self, rewards: list[float], values: list[float], dones: list[bool]):
-        returns, gae = [], 0
-        values = list(values) + [0]
-        for t in reversed(range(len(rewards))):
-            delta = rewards[t] + self.gamma * values[t + 1] * (1 - dones[t]) - values[t]
-            gae = delta + self.gamma * self.lam * (1 - dones[t]) * gae
-            returns.insert(0, gae + values[t])
+    def _compute_gae(
+        self,
+        rewards: torch.Tensor,
+        values: torch.Tensor,
+        dones: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Computes GAE-Lambda advantage estimates and TD-lambda returns.
+        """
+        T = len(rewards)
+        advantages = torch.zeros(T, device=self.device)
+        last_adv = 0.0
+        vls = torch.cat((values, torch.zeros(1, device=self.device)))
+        for t in reversed(range(T)):
+            mask = 1.0 - dones[t]
+            delta = rewards[t] + self.gamma * vls[t + 1] * mask - vls[t]
+            last_adv = delta + self.gamma * self.lam * mask * last_adv
+            advantages[t] = last_adv
+        returns = advantages + vls[:-1]
 
-        return returns
+        return advantages, returns
