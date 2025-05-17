@@ -4,11 +4,11 @@ from rl_temple.runners.base import AgentRunner
 class OnPolicyRunner(AgentRunner):
     """For agents that collect rollout, then update."""
 
-    def run_episode(self, max_steps: int, explore: bool = True) -> float:
+    def run_episode(self, max_steps: int, explore: bool = True) -> dict[str, float]:
         state, _ = self.env.reset()
         total_reward = 0.0
 
-        for _ in range(max_steps):
+        for step in range(max_steps):
             action, info = self.agent.select_action(
                 state, explore=explore, return_info=True
             )
@@ -30,5 +30,9 @@ class OnPolicyRunner(AgentRunner):
             if terminated or truncated:
                 break
 
-        self.agent.end_episode()
-        return total_reward
+        stats = self.agent.end_episode()
+        return {
+            "total_reward": total_reward,
+            "steps": step,
+            **stats,
+        }

@@ -28,8 +28,8 @@ class BaseAgent(ABC):
         """
         pass
 
-    def end_episode(self) -> None:
+    def end_episode(self) -> dict[str, float]:
         """
         Optional hook: called at the end of an episode.
         """
-        pass
+        return {}

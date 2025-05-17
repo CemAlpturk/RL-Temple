@@ -43,7 +43,8 @@ class Trainer:
 
         for episode in (pbar := tqdm(range(1, self.num_episodes + 1))):
             self.episode = episode
-            total_reward = self.runner.run_episode(self.max_steps)
+            episode_stats: dict = self.runner.run_episode(self.max_steps)
+            total_reward = episode_stats["total_reward"]
 
             pbar_str = f"Reward: {total_reward:.2f}"
 
@@ -54,11 +55,12 @@ class Trainer:
             pbar.set_description(pbar_str)
 
             # Logging
-            self.logger.log_scalar(
-                tag="train/episode_reward",
-                scalar_value=total_reward,
-                global_step=self.episode,
-            )
+            for key, value in episode_stats.items():
+                self.logger.log_scalar(
+                    tag=f"train/{key}",
+                    scalar_value=value,
+                    global_step=self.episode,
+                )
 
     def evaluate(self) -> float:
         if not self.eval_env:
@@ -67,7 +69,7 @@ class Trainer:
         eval_runner = type(self.runner)(self.agent, self.eval_env)
 
         rewards = [
-            eval_runner.run_episode(self.max_steps, explore=False)
+            eval_runner.run_episode(self.max_steps, explore=False)["total_reward"]
             for _ in range(self.eval_episodes)
         ]
 
