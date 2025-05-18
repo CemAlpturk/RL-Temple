@@ -19,7 +19,7 @@ class Trainer:
         runner: AgentRunner,
         env_fn: Callable[[], gym.Env],
         num_episodes: int = 500,
-        max_steps_per_episode: int = 500,
+        max_steps_per_episode: int | None = None,
         eval_env_fn: Optional[Callable[[], gym.Env]] = None,
         eval_interval: int = 10,
         eval_episodes: int = 5,

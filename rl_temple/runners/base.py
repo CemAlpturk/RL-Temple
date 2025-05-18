@@ -12,7 +12,9 @@ class AgentRunner(ABC):
         self.env = env
 
     @abstractmethod
-    def run_episode(self, max_steps: int, explore: bool = True) -> dict[str, float]:
+    def run_episode(
+        self, max_steps: int | None, explore: bool = True
+    ) -> dict[str, float]:
         """
         Run one episode and return episode stats.
         """

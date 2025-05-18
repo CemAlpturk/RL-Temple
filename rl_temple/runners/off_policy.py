@@ -4,11 +4,13 @@ from rl_temple.runners.base import AgentRunner
 class OffPolicyRunner(AgentRunner):
     """For agents that update every step."""
 
-    def run_episode(self, max_steps: int, explore: bool = True) -> dict[str, float]:
+    def run_episode(
+        self, max_steps: int | None, explore: bool = True
+    ) -> dict[str, float]:
         state, _ = self.env.reset()
         total_reward = 0.0
-
-        for step in range(max_steps):
+        step = 0
+        while True:
             action = self.agent.select_action(state, explore=explore)
             next_state, reward, terminated, truncated, _ = self.env.step(action)
 
@@ -17,7 +19,10 @@ class OffPolicyRunner(AgentRunner):
 
             state = next_state
             total_reward += float(reward)
+            step += 1
 
+            if max_steps is not None and step >= max_steps:
+                break
             if terminated or truncated:
                 break
 
