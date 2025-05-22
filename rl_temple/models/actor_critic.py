@@ -75,19 +75,27 @@ class MLPGaussianActor(Actor):
         activation: str,
     ) -> None:
         super().__init__()
-        log_std = -0.5 * np.ones(act_dim, dtype=np.float32)
-        self.log_std = torch.nn.Parameter(torch.as_tensor(log_std))
-        self.mu_net = MLP(
+
+        if len(hidden_sizes) == 0:
+            raise ValueError("hidden_sizes must be non-empty")
+
+        self.net = MLP(
             input_size=obs_dim,
-            output_size=act_dim,
-            hidden_sizes=hidden_sizes,
+            output_size=hidden_sizes[-1],
+            hidden_sizes=hidden_sizes[:-1],
             activation=activation,
+            final_activation=activation,
         )
+        self.mu_head = nn.Linear(hidden_sizes[-1], act_dim)
+        self.log_std_head = nn.Linear(hidden_sizes[-1], act_dim)
 
     def _distribution(self, obs: torch.Tensor) -> dist.Normal:
-        mu = self.mu_net(obs)
-        std = torch.exp(self.log_std)
-        return dist.Normal(mu, std)
+        x = self.net(obs)
+        mean = self.mu_head(x)
+        log_std = self.log_std_head(x)
+        log_std = torch.clamp(log_std, -20, 2)
+        std = torch.exp(log_std)
+        return dist.Normal(mean, std)
 
     def _log_prob_from_distribution(
         self,
