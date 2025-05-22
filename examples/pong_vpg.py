@@ -1,18 +1,19 @@
 from typing import Callable, Any
 import gymnasium as gym
-from gymnasium.wrappers import TransformObservation, GrayscaleObservation
+
 import numpy as np
 import ale_py
 import torch
 
 from rl_temple.trainer import Trainer
 from rl_temple.agents.vpg_agent import VPGAgent
-from rl_temple.models.actor_critic import MLPActorCritic, CNNActorCritic
+from rl_temple.models.actor_critic import MLPActorCritic
 from rl_temple.runners import OnPolicyRunner
+
 
 gym.register_envs(ale_py)
 
-ENV_NAME = "LunarLander-v3"
+ENV_NAME = "ALE/Pong-v5"
 DEVICE = "cpu"
 
 
@@ -22,10 +23,25 @@ def get_env_fn(
     render_mode: str | None = None,
 ) -> Callable[[], gym.Env]:
 
+    def process(obs: np.ndarray) -> np.ndarray:
+        obs = obs[:, 35:195]
+        obs = obs[:, ::2, ::2, 0]
+        obs[obs == 144] = 0
+        obs[obs == 109] = 0
+        obs[obs != 0] = 1
+        obs = obs.astype(np.float32)
+
+        return obs.ravel()
+
     def env_fn() -> gym.Env:
-        env = gym.make(env_name, render_mode=render_mode, **env_args)
-        # env = GrayscaleObservation(env)
-        # env = TransformObservation(env, lambda x: x[np.newaxis], None)
+        args = {
+            **env_args,
+        }
+        env = gym.make(env_name, render_mode=render_mode, **args)
+        env = gym.wrappers.FrameStackObservation(env, 2)
+
+        obs_space = gym.spaces.Box(low=0, high=1, shape=(2 * 80 * 80,), dtype=np.float32)
+        env = gym.wrappers.TransformObservation(env, process, obs_space)
         return env
 
     return env_fn
@@ -39,44 +55,17 @@ env = env_fn()
 model = MLPActorCritic(
     observation_space=env.observation_space,
     action_space=env.action_space,
-    hidden_sizes=[64, 64],
+    hidden_sizes=[200],
+    activation="relu",
 )
-
-# conv_layers = [
-#     {
-#         "out_channels": 16,
-#         "kernel_size": 3,
-#         "padding": 1,
-#         "batch_norm": True,
-#         "pooling": {
-#             "type": "max",
-#             "kernel_size": 2,
-#         },
-#     },
-#     {
-#         "out_channels": 32,
-#         "kernel_size": 3,
-#         "padding": 1,
-#         "batch_norm": True,
-#         "pooling": {
-#             "type": "max",
-#             "kernel_size": 2,
-#         },
-#     },
-# ]
-# fc_layers = [128, 64]
-
-# model = CNNActorCritic(
-#     observation_space=env.observation_space,
-#     action_space=env.action_space,
-#     conv_layers=conv_layers,
-#     fc_layers=fc_layers,
-#     dropout=0.5,
-# )
 
 agent = VPGAgent(
     model=model,
     device=torch.device(DEVICE),
+    pi_lr=3e-4,
+    vf_lr=1e-3,
+    gamma=0.99,
+    batch_size=10,
 )
 
 runner = OnPolicyRunner(agent, env)
@@ -84,13 +73,14 @@ trainer = Trainer(
     runner,
     env_fn,
     num_episodes=10000,
-    eval_interval=100,
+    eval_interval=50,
     eval_env_fn=eval_env_fn,
-    render_interval=100,
+    render_interval=50,
+    max_steps_per_episode=None,
 )
 trainer.train()
 
-env = gym.make(ENV_NAME, render_mode="human")
+env = get_env_fn(ENV_NAME, render_mode="human")()
 while True:
 
     state, _ = env.reset()
