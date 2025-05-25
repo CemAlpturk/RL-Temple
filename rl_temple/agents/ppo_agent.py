@@ -1,119 +1,241 @@
-from typing import Any
+from typing import Callable
 
 import torch
+import torch.optim as optim
 import torch.nn.functional as F
-from torch.distributions import Categorical
+from torch.utils.data import TensorDataset, DataLoader
 
 import numpy as np
 
 from rl_temple.agents.base_agent import BaseAgent
 from rl_temple.utils.rollout_buffer import RolloutBuffer
-from rl_temple.models.factory import make_model
+from rl_temple.models.actor_critic import ActorCritic
+from .utils import compute_gae
 
 
 class PPOAgent(BaseAgent):
 
     def __init__(
         self,
-        action_dim: int,
-        model_config: dict[str, Any],
+        model: ActorCritic,
         gamma: float = 0.99,
-        lam: float = 0.95,
-        clip_epsilon: float = 0.2,
-        lr: float = 3e-4,
-        epochs: int = 4,
+        lam: float = 0.97,
+        pi_lr: float = 3e-4,
+        vf_lr: float = 1e-3,
+        n_episodes: int = 1000,
+        epochs: int = 10,
         batch_size: int = 64,
+        clip_ratio: float = 0.2,
+        target_kl: float = 0.01,
         device: torch.device | None = None,
     ) -> None:
+
         self.device = device or torch.device(
             "cuda" if torch.cuda.is_available() else "cpu"
         )
         self.gamma = gamma
         self.lam = lam
-        self.clip_epsilon = clip_epsilon
-        self.epochs = epochs
+
+        self.model = model
+        self.model.to(self.device)
+
+        self.n_episodes = n_episodes
         self.batch_size = batch_size
+        self.ep_count = 0
+        self.epochs = epochs
 
-        # Networks
-        self.actor = make_model(model_config["actor"]).to(self.device)
-        self.critic = make_model(model_config["critic"]).to(self.device)
+        self.clip_ratio = clip_ratio
+        self.target_kl = target_kl
 
-        combined_params = list(self.actor.parameters()) + list(self.critic.parameters())
-        self.optimizer = torch.optim.Adam(combined_params, lr=lr)
-        self.buffer = RolloutBuffer()
+        self.pi_optimizer = optim.Adam(self.model.pi.parameters(), lr=pi_lr)
+        self.vf_optimizer = optim.Adam(self.model.v.parameters(), lr=vf_lr)
 
-    def select_action(self, state, explore: bool = True, return_info: bool = False):
+        postprocess_fn = self._get_postprocess_fn()
+        self.buffer = RolloutBuffer(postprocess_fn=postprocess_fn)
+
+    def select_action(
+        self,
+        state: np.ndarray,
+        explore: bool = True,
+        return_info: bool = False,
+    ):
+
+        # Add batch dim
         state_t = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(
             0
         )
-        logits: torch.Tensor = self.actor(state_t)
-        value: torch.Tensor = self.critic(state_t)
-        dist = Categorical(logits=logits)
-        action = dist.sample()
-        log_prob: torch.Tensor = dist.log_prob(action)
-        if return_info:
-            return action.item(), (log_prob.item(), value.item())
+        act, value, logp = self.model.step(state_t)
 
-        return action.item()
+        if return_info:
+            return act.cpu().numpy()[0], (logp.item(), value.item())
+        return act.cpu().numpy()[0]
 
     def remember(
-        self, state, action, reward, next_state, done, log_prob=None, value=None
-    ):
+        self,
+        state: np.ndarray,
+        action: np.ndarray,
+        reward: float,
+        next_state: np.ndarray,
+        done: bool,
+        log_prob: float,
+        value: float,
+    ) -> None:
         self.buffer.add((state, action, reward, log_prob, value, done))
 
-    def update(self):
+    def update(self) -> None:
         # No update
         pass
 
-    def end_episode(self):
-        self._learn()
-        self.buffer.clear()
+    def end_episode(self) -> dict[str, float]:
+        self.buffer.end_episode()
+        if len(self.buffer) == self.n_episodes:
+            stats = self._learn()
+            self.buffer.clear()
+            return stats
+        return {}
 
-    def _learn(self):
-        states, actions, rewards, log_probs_old, values, dones = self.buffer.get()
+    def _learn(self) -> dict[str, float]:
+        episodes = self.buffer.get()
 
-        states = torch.tensor(np.array(states), dtype=torch.float32, device=self.device)
-        actions = torch.tensor(actions, dtype=torch.int64, device=self.device)
-        old_log_probs = torch.tensor(
-            log_probs_old, dtype=torch.float32, device=self.device
+        states = torch.tensor(
+            np.concatenate([ep["states"] for ep in episodes]),
+            dtype=torch.float32,
         )
-        values = torch.tensor(values, dtype=torch.float32, device=self.device)
+        actions = torch.tensor(
+            np.concatenate([ep["actions"] for ep in episodes]),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        old_log_probs = torch.tensor(
+            np.concatenate([ep["log_probs"] for ep in episodes]),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        advantages = torch.tensor(
+            np.concatenate([ep["advantages"] for ep in episodes]),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        returns = torch.tensor(
+            np.concatenate([ep["returns"] for ep in episodes]),
+            dtype=torch.float32,
+            device=self.device,
+        )
 
-        gae = self._compute_gae(rewards, values.cpu().numpy(), dones)
-        returns = torch.tensor(gae, dtype=torch.float32, device=self.device)
+        dataset = TensorDataset(states, actions, old_log_probs, advantages, returns)
+        continue_training = True
+        pi_losses = []
+        v_losses = []
+        kls = []
+        entropies = []
+        clip_fracs = []
+        for epoch in range(self.epochs):
+            dataloader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
 
-        advantages = returns - values
+            for batch in dataloader:
+                (
+                    batch_states,
+                    batch_actions,
+                    batch_old_log_probs,
+                    batch_advantages,
+                    batch_returns,
+                ) = (b.to(self.device) for b in batch)
 
-        for _ in range(self.epochs):
-            for i in range(0, len(states), self.batch_size):
-                idx = slice(i, i + self.batch_size)
-                batch_states = states[idx]
-                batch_actions = actions[idx]
-                batch_adv = advantages[idx]
-                batch_returns = returns[idx]
-                batch_old_log_probs = old_log_probs[idx]
+                # Update policy
+                self.pi_optimizer.zero_grad()
+                loss_pi, pi_info = self._compute_loss_pi(
+                    batch_states, batch_actions, batch_old_log_probs, batch_advantages
+                )
+                kl = pi_info["kl"]
+                if kl > 1.5 * self.target_kl:
+                    # Early stopping if KL divergence is too high
+                    continue_training = False
+                    break
+                loss_pi.backward()
+                self.pi_optimizer.step()
 
-                logits = self.actor(batch_states)
-                value = self.critic(batch_states)
-                dist = Categorical(logits=logits)
-                new_log_probs = dist.log_prob(batch_actions)
-                ratio = torch.exp(new_log_probs - batch_old_log_probs)
-                clipped = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon)
-                policy_loss = -torch.min(ratio * batch_adv, clipped * batch_adv).mean()
-                value_loss = F.mse_loss(value.squeeze(-1), batch_returns)
-                entropy = dist.entropy().mean()
+                # Update value function
+                self.vf_optimizer.zero_grad()
+                loss_v = self._compute_loss_v(batch_states, batch_returns)
+                loss_v.backward()
+                self.vf_optimizer.step()
 
-                loss = policy_loss + 0.5 * value_loss - 0.01 * entropy
-                self.optimizer.zero_grad()
-                loss.backward()
-                self.optimizer.step()
+                pi_losses.append(loss_pi.item())
+                v_losses.append(loss_v.item())
+                kls.append(pi_info["kl"])
+                entropies.append(pi_info["ent"])
+                clip_fracs.append(pi_info["clip_frac"])
 
-    def _compute_gae(self, rewards, values, dones):
-        returns, gae = [], 0
-        values = list(values) + [0]
-        for t in reversed(range(len(rewards))):
-            delta = rewards[t] + self.gamma * values[t + 1] * (1 - dones[t]) - values[t]
-            gae = delta + self.gamma * self.lam * (1 - dones[t]) * gae
-            returns.insert(0, gae + values[t])
+            if not continue_training:
+                # Early stopping
+                break
 
-        return returns
+        stats = {
+            "loss_pi": np.mean(pi_losses),
+            "loss_v": np.mean(v_losses),
+            "KL": np.mean(kls),
+            "entropy": np.mean(entropies),
+            "clip_frac": np.mean(clip_fracs),
+        }
+
+        return stats  # type: ignore
+
+    def _compute_loss_pi(
+        self,
+        states: torch.Tensor,
+        actions: torch.Tensor,
+        old_log_probs: torch.Tensor,
+        advantages: torch.Tensor,
+    ) -> tuple[torch.Tensor, dict[str, float]]:
+
+        # Policy loss
+        pi, logp = self.model.pi(states, actions)
+        ratio = torch.exp(logp - old_log_probs)
+        clip_adv = (
+            torch.clamp(ratio, 1 - self.clip_ratio, 1 + self.clip_ratio) * advantages
+        )
+        loss_pi = -(torch.min(ratio * advantages, clip_adv)).mean()
+
+        # Extra data
+        approx_kl = (old_log_probs - logp).mean().item()
+        ent = pi.entropy().mean().item()
+        clipped = ratio.gt(1 + self.clip_ratio) | ratio.lt(1 - self.clip_ratio)
+        clip_frac = torch.as_tensor(clipped).float().mean().item()
+        pi_info = {
+            "kl": approx_kl,
+            "ent": ent,
+            "clip_frac": clip_frac,
+        }
+        return loss_pi, pi_info
+
+    def _compute_loss_v(
+        self,
+        states: torch.Tensor,
+        returns: torch.Tensor,
+    ) -> torch.Tensor:
+        # Value function loss
+        values = self.model.v(states)
+        loss_v = F.mse_loss(values.squeeze(-1), returns)
+        return loss_v
+
+    def _get_postprocess_fn(
+        self,
+    ) -> Callable[[dict[str, np.ndarray]], dict[str, np.ndarray]]:
+        gamma = self.gamma
+        lam = self.lam
+
+        def postprocess_fn(episode: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+            rewards = episode["rewards"]
+            values = episode["values"]
+            dones = episode["dones"]
+
+            # Compute GAE
+            returns, advantages = compute_gae(rewards, values, dones, gamma, lam)
+
+            # Add to episode
+            episode["returns"] = returns
+            episode["advantages"] = advantages
+
+            return episode
+
+        return postprocess_fn
