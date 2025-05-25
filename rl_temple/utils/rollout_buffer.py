@@ -1,3 +1,4 @@
+from typing import Callable
 import numpy as np
 
 Transition = tuple[np.ndarray, np.ndarray, float, float, float, bool]
@@ -5,8 +6,14 @@ Transition = tuple[np.ndarray, np.ndarray, float, float, float, bool]
 
 class RolloutBuffer:
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        postprocess_fn: (
+            Callable[[dict[str, np.ndarray]], dict[str, np.ndarray]] | None
+        ) = None,
+    ) -> None:
         self.clear()
+        self.postprocess_fn = postprocess_fn
 
     def add(self, transition: Transition) -> None:
         state, action, reward, log_prob, value, done = transition
@@ -27,6 +34,7 @@ class RolloutBuffer:
             "values": np.array(self.current_values),
             "dones": np.array(self.current_dones),
         }
+        episode = self.postprocess_fn(episode) if self.postprocess_fn else episode
         self.trajectories.append(episode)
 
         self.current_states = []

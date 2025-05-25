@@ -1,3 +1,5 @@
+from typing import Callable
+
 import torch
 import torch.optim as optim
 import torch.nn.functional as F
@@ -7,6 +9,38 @@ import numpy as np
 from rl_temple.agents.base_agent import BaseAgent
 from rl_temple.utils.rollout_buffer import RolloutBuffer
 from rl_temple.models.actor_critic import ActorCritic
+
+
+def _compute_gae(
+    rewards: np.ndarray,
+    values: np.ndarray,
+    dones: np.ndarray,
+    gamma: float,
+    lam: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    advantages = np.zeros_like(rewards)
+    returns = np.zeros_like(rewards)
+    gae = 0.0
+    next_value = 0.0
+
+    for t in reversed(range(len(rewards))):
+        mask = 1.0 - dones[t]
+        delta = rewards[t] + gamma * next_value * mask - values[t]
+        gae = delta + gamma * lam * mask * gae
+        advantages[t] = gae
+        next_value = values[t]
+
+    returns = advantages + values
+    return returns, advantages
+
+
+def _compute_rewards_to_go(rewards: np.ndarray, gamma: float) -> np.ndarray:
+    rewards_to_go = np.zeros_like(rewards)
+    running_sum = 0.0
+    for i in reversed(range(len(rewards))):
+        running_sum = rewards[i] + gamma * running_sum
+        rewards_to_go[i] = running_sum
+    return rewards_to_go
 
 
 class VPGAgent(BaseAgent):
@@ -19,10 +53,10 @@ class VPGAgent(BaseAgent):
         pi_lr: float = 3e-4,
         vf_lr: float = 1e-3,
         vf_lr_decay: float = 0.5,
-        vf_lr_patience: int = 5,
+        vf_lr_patience: int = 10,
         vf_lr_threshold: float = 1e-4,
         vf_early_stopping_patience: int = 10,
-        vf_early_stopping_tol: float = float("inf"),
+        vf_early_stopping_tol: float = -float("inf"),
         batch_size: int = 4,
         train_v_iters: int = 80,
         device=None,
@@ -54,7 +88,8 @@ class VPGAgent(BaseAgent):
         self.vf_early_stopping_patience = vf_early_stopping_patience
         self.vf_early_stopping_tol = vf_early_stopping_tol
 
-        self.buffer = RolloutBuffer()
+        postprocess_fn = self._get_postprocess_fn()
+        self.buffer = RolloutBuffer(postprocess_fn=postprocess_fn)
 
     def select_action(
         self,
@@ -102,37 +137,26 @@ class VPGAgent(BaseAgent):
     def _learn(self) -> dict[str, float]:
         episodes = self.buffer.get()
 
-        all_states, all_actions = [], []
-        all_returns, all_advantages = [], []
-
-        for episode in episodes:
-            states = episode["states"]
-            actions = episode["actions"]
-            rewards = episode["rewards"]
-            values = episode["values"]
-            dones = episode["dones"]
-            states = torch.tensor(states, dtype=torch.float32, device=self.device)
-            actions = torch.tensor(actions, dtype=torch.float32, device=self.device)
-            rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device)
-            values = torch.tensor(values, dtype=torch.float32, device=self.device)
-            dones = torch.tensor(dones, dtype=torch.float32, device=self.device)
-
-            # Use GAE for returns and advantages
-            returns, advantages = self._compute_gae(rewards, values, dones)
-
-            # Stash
-            all_states.append(states)
-            all_actions.append(actions)
-            all_returns.append(returns)
-            all_advantages.append(advantages)
-
-        states = torch.cat(all_states, dim=0)  # (N, *state_dim)
-        actions = torch.cat(all_actions, dim=0)  # (N, *action_dim)
-        returns = torch.cat(all_returns, dim=0)  # (N,)
-        advantages = torch.cat(all_advantages, dim=0)  # (N,)
-
-        # Normalize advantages
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        states = torch.tensor(
+            np.concatenate([ep["states"] for ep in episodes]),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        actions = torch.tensor(
+            np.concatenate([ep["actions"] for ep in episodes]),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        advantages = torch.tensor(
+            np.concatenate([ep["advantages"] for ep in episodes]),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        returns = torch.tensor(
+            np.concatenate([ep["returns"] for ep in episodes]),
+            dtype=torch.float32,
+            device=self.device,
+        )
 
         # Update policy
         policy_loss = self._train_pi(states, actions, advantages)
@@ -189,31 +213,28 @@ class VPGAgent(BaseAgent):
                 break
         return value_loss.item(), step + 1
 
-    def _compute_rewards_to_go(self, rewards: torch.Tensor) -> torch.Tensor:
-        rewards_to_go = torch.zeros_like(rewards)
-        running_sum = 0.0
-        for i in reversed(range(len(rewards))):
-            running_sum = rewards[i] + self.gamma * running_sum
-            rewards_to_go[i] = running_sum
-        return rewards_to_go
-
-    def _compute_gae(
+    def _get_postprocess_fn(
         self,
-        rewards: torch.Tensor,
-        values: torch.Tensor,
-        dones: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        advantages = torch.zeros_like(rewards)
-        returns = torch.zeros_like(rewards)
-        gae = 0.0
-        next_value = 0.0
+    ) -> Callable[[dict[str, np.ndarray]], dict[str, np.ndarray]]:
 
-        for t in reversed(range(len(rewards))):
-            mask = 1.0 - dones[t]
-            delta = rewards[t] + self.gamma * next_value * mask - values[t]
-            gae = delta + self.gamma * self.lam * mask * gae
-            advantages[t] = gae
-            next_value = values[t]
+        gamma = self.gamma
+        lam = self.lam
 
-        returns = advantages + values
-        return returns, advantages
+        def postprocess_fn(episode: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+            rewards = episode["rewards"]
+            values = episode["values"]
+            dones = episode["dones"]
+
+            # Compute GAE
+            returns, advantages = _compute_gae(rewards, values, dones, gamma, lam)
+
+            # Normalize advantages
+            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+            # Update the episode dict
+            episode["returns"] = returns
+            episode["advantages"] = advantages
+
+            return episode
+
+        return postprocess_fn
