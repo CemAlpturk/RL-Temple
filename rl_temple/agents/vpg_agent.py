@@ -100,10 +100,8 @@ class VPGAgent(BaseAgent):
             values = torch.tensor(values, dtype=torch.float32, device=self.device)
             dones = torch.tensor(dones, dtype=torch.float32, device=self.device)
 
-            returns = self._compute_rewards_to_go(rewards)
-            # Normalize returns
-            returns = (returns - returns.mean()) / (returns.std() + 1e-8)
-            advantages = returns - values
+            # Use GAE for returns and advantages
+            returns, advantages = self._compute_gae(rewards, values, dones)
 
             # Stash
             all_states.append(states)
@@ -115,6 +113,9 @@ class VPGAgent(BaseAgent):
         actions = torch.cat(all_actions, dim=0)  # (N, *action_dim)
         returns = torch.cat(all_returns, dim=0)  # (N,)
         advantages = torch.cat(all_advantages, dim=0)  # (N,)
+
+        # Normalize advantages
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
         # Update policy
         _, log_probs = self.model.pi(states, actions)
@@ -153,18 +154,17 @@ class VPGAgent(BaseAgent):
         values: torch.Tensor,
         dones: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        Computes GAE-Lambda advantage estimates and TD-lambda returns.
-        """
-        T = len(rewards)
-        advantages = torch.zeros(T, device=self.device)
-        last_adv = 0.0
-        vls = torch.cat((values, torch.zeros(1, device=self.device)))
-        for t in reversed(range(T)):
-            mask = 1.0 - dones[t]
-            delta = rewards[t] + self.gamma * vls[t + 1] * mask - vls[t]
-            last_adv = delta + self.gamma * self.lam * mask * last_adv
-            advantages[t] = last_adv
-        returns = advantages + vls[:-1]
+        advantages = torch.zeros_like(rewards)
+        returns = torch.zeros_like(rewards)
+        gae = 0.0
+        next_value = 0.0
 
-        return advantages, returns
+        for t in reversed(range(len(rewards))):
+            mask = 1.0 - dones[t]
+            delta = rewards[t] + self.gamma * next_value * mask - values[t]
+            gae = delta + self.gamma * self.lam * mask * gae
+            advantages[t] = gae
+            next_value = values[t]
+
+        returns = advantages + values
+        return returns, advantages
