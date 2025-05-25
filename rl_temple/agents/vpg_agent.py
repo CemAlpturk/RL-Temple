@@ -120,6 +120,24 @@ class VPGAgent(BaseAgent):
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
         # Update policy
+        policy_loss = self._train_pi(states, actions, advantages)
+
+        # Update value function
+        returns = returns.detach()
+        value_loss = self._train_v(states, returns)
+
+        stats = {
+            "loss_pi": policy_loss,
+            "loss_v": value_loss,
+        }
+        return stats
+
+    def _train_pi(
+        self,
+        states: torch.Tensor,
+        actions: torch.Tensor,
+        advantages: torch.Tensor,
+    ) -> float:
         _, log_probs = self.model.pi(states, actions)
         policy_loss: torch.Tensor = -(log_probs * advantages).mean()
 
@@ -127,22 +145,17 @@ class VPGAgent(BaseAgent):
         policy_loss.backward()
         self.pi_optimizer.step()
 
-        # Update value function
-        returns = returns.detach()
+        return policy_loss.item()
+
+    def _train_v(self, states: torch.Tensor, returns: torch.Tensor) -> float:
         for _ in range(self.train_v_iters):
             self.vf_optimizer.zero_grad()
 
-            value_preds = self.model.v(states).squeeze()  # (N,)
+            value_preds = self.model.v(states).squeeze()
             value_loss = F.mse_loss(value_preds, returns)
-
             value_loss.backward()
             self.vf_optimizer.step()
-
-        stats = {
-            "loss_pi": policy_loss.item(),
-            "loss_v": value_loss.item(),
-        }
-        return stats
+        return value_loss.item()
 
     def _compute_rewards_to_go(self, rewards: torch.Tensor) -> torch.Tensor:
         rewards_to_go = torch.zeros_like(rewards)
