@@ -19,6 +19,7 @@ class VPGAgent(BaseAgent):
         pi_lr: float = 3e-4,
         vf_lr: float = 1e-3,
         batch_size: int = 4,
+        train_v_iters: int = 80,
         device=None,
     ) -> None:
 
@@ -33,6 +34,7 @@ class VPGAgent(BaseAgent):
 
         self.batch_size = batch_size
         self.ep_count = 0
+        self.train_v_iters = train_v_iters
 
         self.pi_optimizer = optim.Adam(self.model.pi.parameters(), lr=pi_lr)
         self.vf_optimizer = optim.Adam(self.model.v.parameters(), lr=vf_lr)
@@ -127,12 +129,14 @@ class VPGAgent(BaseAgent):
 
         # Update value function
         returns = returns.detach()
-        value_preds = self.model.v(states).squeeze()  # (N,)
-        value_loss = F.mse_loss(value_preds, returns)
+        for _ in range(self.train_v_iters):
+            self.vf_optimizer.zero_grad()
 
-        self.vf_optimizer.zero_grad()
-        value_loss.backward()
-        self.vf_optimizer.step()
+            value_preds = self.model.v(states).squeeze()  # (N,)
+            value_loss = F.mse_loss(value_preds, returns)
+
+            value_loss.backward()
+            self.vf_optimizer.step()
 
         stats = {
             "loss_pi": policy_loss.item(),
