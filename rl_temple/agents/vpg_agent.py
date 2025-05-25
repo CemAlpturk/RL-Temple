@@ -18,6 +18,11 @@ class VPGAgent(BaseAgent):
         lam: float = 0.95,
         pi_lr: float = 3e-4,
         vf_lr: float = 1e-3,
+        vf_lr_decay: float = 0.5,
+        vf_lr_patience: int = 5,
+        vf_lr_threshold: float = 1e-4,
+        vf_early_stopping_patience: int = 10,
+        vf_early_stopping_tol: float = float("inf"),
         batch_size: int = 4,
         train_v_iters: int = 80,
         device=None,
@@ -38,6 +43,16 @@ class VPGAgent(BaseAgent):
 
         self.pi_optimizer = optim.Adam(self.model.pi.parameters(), lr=pi_lr)
         self.vf_optimizer = optim.Adam(self.model.v.parameters(), lr=vf_lr)
+
+        self.vf_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer=self.vf_optimizer,
+            mode="min",
+            factor=vf_lr_decay,
+            patience=vf_lr_patience,
+            threshold=vf_lr_threshold,
+        )
+        self.vf_early_stopping_patience = vf_early_stopping_patience
+        self.vf_early_stopping_tol = vf_early_stopping_tol
 
         self.buffer = RolloutBuffer()
 
@@ -124,11 +139,15 @@ class VPGAgent(BaseAgent):
 
         # Update value function
         returns = returns.detach()
-        value_loss = self._train_v(states, returns)
+        value_loss, train_v_steps = self._train_v(states, returns)
+        self.vf_scheduler.step(value_loss)
+        vf_lr = self.vf_optimizer.param_groups[0]["lr"]
 
         stats = {
             "loss_pi": policy_loss,
             "loss_v": value_loss,
+            "lr_v": vf_lr,
+            "v_train_steps": train_v_steps,
         }
         return stats
 
@@ -138,24 +157,37 @@ class VPGAgent(BaseAgent):
         actions: torch.Tensor,
         advantages: torch.Tensor,
     ) -> float:
+        self.pi_optimizer.zero_grad()
+
         _, log_probs = self.model.pi(states, actions)
         policy_loss: torch.Tensor = -(log_probs * advantages).mean()
 
-        self.pi_optimizer.zero_grad()
         policy_loss.backward()
         self.pi_optimizer.step()
 
         return policy_loss.item()
 
-    def _train_v(self, states: torch.Tensor, returns: torch.Tensor) -> float:
-        for _ in range(self.train_v_iters):
-            self.vf_optimizer.zero_grad()
+    def _train_v(self, states: torch.Tensor, returns: torch.Tensor) -> tuple[float, int]:
+        best_loss = float("inf")
+        steps_without_improvement = 0
 
+        for step in range(self.train_v_iters):
             value_preds = self.model.v(states).squeeze()
             value_loss = F.mse_loss(value_preds, returns)
+
+            self.vf_optimizer.zero_grad()
             value_loss.backward()
             self.vf_optimizer.step()
-        return value_loss.item()
+
+            if best_loss - value_loss.item() > self.vf_early_stopping_tol:
+                best_loss = value_loss.item()
+                steps_without_improvement = 0
+            else:
+                steps_without_improvement += 1
+
+            if steps_without_improvement >= self.vf_early_stopping_patience:
+                break
+        return value_loss.item(), step + 1
 
     def _compute_rewards_to_go(self, rewards: torch.Tensor) -> torch.Tensor:
         rewards_to_go = torch.zeros_like(rewards)
