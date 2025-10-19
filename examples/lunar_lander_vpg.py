@@ -36,6 +36,12 @@ def main(
     vf_lr: float,
     gamma: float,
     batch_size: int,
+    train_v_iters: int,
+    vf_lr_decay: float,
+    vf_lr_patience: int,
+    vf_lr_threshold: float,
+    vf_early_stopping_patience: int,
+    vf_early_stopping_tol: float,
     num_episodes: int,
     max_steps_per_episode: int,
     eval_interval: int,
@@ -63,6 +69,12 @@ def main(
         vf_lr=vf_lr,
         gamma=gamma,
         batch_size=batch_size,
+        train_v_iters=train_v_iters,
+        vf_lr_decay=vf_lr_decay,
+        vf_lr_patience=vf_lr_patience,
+        vf_lr_threshold=vf_lr_threshold,
+        vf_early_stopping_patience=vf_early_stopping_patience,
+        vf_early_stopping_tol=vf_early_stopping_tol,
     )
 
     # Runner and trainer
@@ -138,6 +150,42 @@ if __name__ == "__main__":
         help="Batch size for training",
     )
     parser.add_argument(
+        "--train_v_iters",
+        type=int,
+        default=80,
+        help="Number of training iterations for the value function",
+    )
+    parser.add_argument(
+        "--vf_lr_decay",
+        type=float,
+        default=0.5,
+        help="Learning rate decay factor for the value function",
+    )
+    parser.add_argument(
+        "--vf_lr_patience",
+        type=int,
+        default=10,
+        help="Patience for the value function learning rate scheduler",
+    )
+    parser.add_argument(
+        "--vf_lr_threshold",
+        type=float,
+        default=1e-4,
+        help="Threshold for the value function learning rate scheduler",
+    )
+    parser.add_argument(
+        "--vf_early_stopping_patience",
+        type=int,
+        default=10,
+        help="Patience for the value function early stopping",
+    )
+    parser.add_argument(
+        "--vf_early_stopping_tol",
+        type=float,
+        default=-float("inf"),
+        help="Tolerance for the value function early stopping",
+    )
+    parser.add_argument(
         "--num_episodes",
         type=int,
         default=50000,
@@ -146,7 +194,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--max_steps_per_episode",
         type=int,
-        default=500,
+        default=None,
         help="Maximum steps per episode",
     )
     parser.add_argument(
@@ -169,6 +217,12 @@ if __name__ == "__main__":
         vf_lr=args.vf_lr,
         gamma=args.gamma,
         batch_size=args.batch_size,
+        train_v_iters=args.train_v_iters,
+        vf_lr_decay=args.vf_lr_decay,
+        vf_lr_patience=args.vf_lr_patience,
+        vf_lr_threshold=args.vf_lr_threshold,
+        vf_early_stopping_patience=args.vf_early_stopping_patience,
+        vf_early_stopping_tol=args.vf_early_stopping_tol,
         num_episodes=args.num_episodes,
         max_steps_per_episode=args.max_steps_per_episode,
         eval_interval=args.eval_interval,

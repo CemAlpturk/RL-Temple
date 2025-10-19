@@ -1,59 +1,85 @@
+from typing import Callable, Any
 import gymnasium as gym
+
+import numpy as np
 import ale_py
 import torch
 
 from rl_temple.trainer import Trainer
 from rl_temple.agents.ppo_agent import PPOAgent
+from rl_temple.models.actor_critic import MLPActorCritic
 from rl_temple.runners import OnPolicyRunner
+
 
 gym.register_envs(ale_py)
 
+ENV_NAME = "BipedalWalker-v3"
+DEVICE = "cpu"
 
-def env_fn():
-    return gym.make("LunarLander-v3")
 
+def get_env_fn(
+    env_name: str,
+    env_args: dict[str, Any] = {},
+    render_mode: str | None = None,
+) -> Callable[[], gym.Env]:
+
+    def apply(act: np.ndarray) -> np.ndarray:
+        squashed = np.tanh(act)
+        return squashed
+
+    def env_fn() -> gym.Env:
+        args = {
+            **env_args,
+        }
+        env = gym.make(env_name, render_mode=render_mode, **args)
+        action_space = env.action_space
+        new_action_space = gym.spaces.Box(
+            low=-1, high=1, shape=action_space.shape, dtype=np.float32
+        )
+        env = gym.wrappers.TransformAction(env, apply, new_action_space)
+        return env
+
+    return env_fn
+
+
+env_fn = get_env_fn(ENV_NAME)
+eval_env_fn = get_env_fn(ENV_NAME, render_mode="rgb_array")
 
 env = env_fn()
-state_dim = env.observation_space.shape[0]
-action_dim = env.action_space.n
 
-model_config = {
-    "actor": {
-        "type": "mlp",
-        "args": {
-            "input_size": state_dim,
-            "output_size": action_dim,
-            "hidden_sizes": [128, 128],
-            "activation": "tanh",
-        },
-    },
-    "critic": {
-        "type": "mlp",
-        "args": {
-            "input_size": state_dim,
-            "output_size": 1,
-            "hidden_sizes": [128, 128],
-            "activation": "tanh",
-        },
-    },
-}
+model = MLPActorCritic(
+    observation_space=env.observation_space,
+    action_space=env.action_space,
+    hidden_sizes=[64, 64],
+    activation="tanh",
+)
 
 agent = PPOAgent(
-    action_dim=action_dim,
-    model_config=model_config,
-    device=torch.device("cuda"),
+    model=model,
+    device=torch.device(DEVICE),
+    pi_lr=3e-4,
+    vf_lr=1e-3,
+    gamma=0.99,
+    batch_size=64,
+    epochs=10,
+    n_episodes=10,
+    clip_ratio=0.2,
+    target_kl=0.01,
 )
+
 runner = OnPolicyRunner(agent, env)
 trainer = Trainer(
     runner,
     env_fn,
-    num_episodes=10000,
-    eval_interval=20,
-    eval_env_fn=env_fn,
+    num_episodes=100000,
+    eval_interval=100,
+    eval_env_fn=eval_env_fn,
+    render_interval=100,
+    max_steps_per_episode=None,
 )
 trainer.train()
 
-env = gym.make("LunarLander-v3", render_mode="human")
+env = get_env_fn(ENV_NAME, render_mode="human")()
 while True:
 
     state, _ = env.reset()
