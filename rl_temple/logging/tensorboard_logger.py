@@ -5,8 +5,10 @@ from typing import Any
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
+from .base_logger import BaseLogger
 
-class TensorboardLogger:
+
+class TensorboardLogger(BaseLogger):
 
     def __init__(self, log_dir: str | None = None) -> None:
 

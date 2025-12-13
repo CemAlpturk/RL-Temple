@@ -9,7 +9,7 @@ import torch
 import numpy as np
 
 from rl_temple.runners import AgentRunner
-from rl_temple.logging.tensorboard_logger import TensorboardLogger
+from rl_temple.logging import BaseLogger, TensorboardLogger
 
 
 class Trainer:
@@ -24,6 +24,7 @@ class Trainer:
         eval_interval: int = 10,
         eval_episodes: int = 5,
         render_interval: int = 100,
+        logger: BaseLogger | None = None,
     ) -> None:
         self.episode = 0
         self.runner = runner
@@ -37,7 +38,7 @@ class Trainer:
         self.eval_episodes = eval_episodes
         self.render_interval = render_interval
 
-        self.logger = TensorboardLogger()
+        self.logger = logger if logger is not None else TensorboardLogger()
 
     def train(self):
 

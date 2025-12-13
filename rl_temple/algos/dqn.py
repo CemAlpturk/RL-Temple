@@ -13,7 +13,7 @@ from copy import deepcopy
 from tqdm import tqdm
 
 # from temple.models import make_model
-from rl_temple.logging import TensorboardLogger
+from rl_temple.logging import BaseLogger, TensorboardLogger
 
 
 class Transition(NamedTuple):
@@ -99,6 +99,7 @@ class DQNAgent:
         train_per_step: int = 1,
         record_env_interval: int = 10000,
         log_dir: str | None = None,
+        logger: BaseLogger | None = None,
     ) -> None:
         self.env = env
 
@@ -137,7 +138,10 @@ class DQNAgent:
         self.record_env_interval = record_env_interval
 
         # Logging
-        self.logger = TensorboardLogger(log_dir)
+        if logger is not None:
+            self.logger = logger
+        else:
+            self.logger = TensorboardLogger(log_dir)
 
     def choose_action(self, state: np.ndarray, training: bool = True) -> int:
         if training and random.random() < self.epsilon:
