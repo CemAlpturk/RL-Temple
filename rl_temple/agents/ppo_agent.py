@@ -58,13 +58,22 @@ class PPOAgent(BaseAgent):
         state: np.ndarray,
         explore: bool = True,
         return_info: bool = False,
+        action_mask: np.ndarray | None = None,
     ):
 
         # Add batch dim
         state_t = torch.tensor(state, dtype=torch.float32, device=self.device).unsqueeze(
             0
         )
-        act, value, logp = self.model.step(state_t)
+
+        # Convert action mask to tensor if provided
+        mask_t = None
+        if action_mask is not None:
+            mask_t = torch.tensor(
+                action_mask, dtype=torch.bool, device=self.device
+            ).unsqueeze(0)
+
+        act, value, logp = self.model.step(state_t, mask_t)
 
         if return_info:
             return act.cpu().numpy()[0], (logp.item(), value.item())
@@ -79,8 +88,9 @@ class PPOAgent(BaseAgent):
         done: bool,
         log_prob: float,
         value: float,
+        action_mask: np.ndarray | None = None,
     ) -> None:
-        self.buffer.add((state, action, reward, log_prob, value, done))
+        self.buffer.add((state, action, reward, log_prob, value, done, action_mask))
 
     def update(self) -> None:
         # No update
@@ -122,7 +132,24 @@ class PPOAgent(BaseAgent):
             device=self.device,
         )
 
-        dataset = TensorDataset(states, actions, old_log_probs, advantages, returns)
+        # Check if action masks are available
+        has_masks = "action_masks" in episodes[0]
+        if has_masks:
+            action_masks = torch.tensor(
+                np.concatenate([ep["action_masks"] for ep in episodes]),
+                dtype=torch.bool,
+                device=self.device,
+            )
+        else:
+            action_masks = None
+
+        if has_masks and action_masks is not None:
+            dataset = TensorDataset(
+                states, actions, old_log_probs, advantages, returns, action_masks
+            )
+        else:
+            dataset = TensorDataset(states, actions, old_log_probs, advantages, returns)
+
         continue_training = True
         pi_losses = []
         v_losses = []
@@ -133,18 +160,33 @@ class PPOAgent(BaseAgent):
             dataloader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
 
             for batch in dataloader:
-                (
-                    batch_states,
-                    batch_actions,
-                    batch_old_log_probs,
-                    batch_advantages,
-                    batch_returns,
-                ) = (b.to(self.device) for b in batch)
+                if has_masks:
+                    (
+                        batch_states,
+                        batch_actions,
+                        batch_old_log_probs,
+                        batch_advantages,
+                        batch_returns,
+                        batch_masks,
+                    ) = (b.to(self.device) for b in batch)
+                else:
+                    (
+                        batch_states,
+                        batch_actions,
+                        batch_old_log_probs,
+                        batch_advantages,
+                        batch_returns,
+                    ) = (b.to(self.device) for b in batch)
+                    batch_masks = None
 
                 # Update policy
                 self.pi_optimizer.zero_grad()
                 loss_pi, pi_info = self._compute_loss_pi(
-                    batch_states, batch_actions, batch_old_log_probs, batch_advantages
+                    batch_states,
+                    batch_actions,
+                    batch_old_log_probs,
+                    batch_advantages,
+                    batch_masks,
                 )
                 kl = pi_info["kl"]
                 if kl > 1.5 * self.target_kl:
@@ -186,10 +228,11 @@ class PPOAgent(BaseAgent):
         actions: torch.Tensor,
         old_log_probs: torch.Tensor,
         advantages: torch.Tensor,
+        action_masks: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, dict[str, float]]:
 
         # Policy loss
-        pi, logp = self.model.pi(states, actions)
+        pi, logp = self.model.pi(states, actions, action_masks)
         ratio = torch.exp(logp - old_log_probs)
         clip_adv = (
             torch.clamp(ratio, 1 - self.clip_ratio, 1 + self.clip_ratio) * advantages

@@ -13,7 +13,9 @@ from .cnn import CNN
 
 class Actor(nn.Module):
 
-    def _distribution(self, obs: torch.Tensor) -> dist.Distribution:
+    def _distribution(
+        self, obs: torch.Tensor, action_mask: torch.Tensor | None = None
+    ) -> dist.Distribution:
         raise NotImplementedError
 
     def _log_prob_from_distribution(
@@ -27,8 +29,9 @@ class Actor(nn.Module):
         self,
         obs: torch.Tensor,
         act: torch.Tensor | None = None,
+        action_mask: torch.Tensor | None = None,
     ) -> tuple[dist.Distribution, torch.Tensor | None]:
-        pi = self._distribution(obs)
+        pi = self._distribution(obs, action_mask)
         logp_a = None
 
         if act is not None:
@@ -53,8 +56,18 @@ class MLPCategoricalActor(Actor):
             activation=activation,
         )
 
-    def _distribution(self, obs: torch.Tensor) -> dist.Categorical:
+    def _distribution(
+        self, obs: torch.Tensor, action_mask: torch.Tensor | None = None
+    ) -> dist.Categorical:
         logits: torch.Tensor = self.logits_net(obs)
+        if action_mask is not None:
+            # Safety check: if no valid actions, don't mask (shouldn't happen)
+            if not action_mask.any():
+                # Log warning but don't crash - allow all actions
+                pass
+            else:
+                # Apply mask: set invalid actions to -inf
+                logits = logits.masked_fill(~action_mask, float("-inf"))
         return dist.Categorical(logits=logits)
 
     def _log_prob_from_distribution(
@@ -228,11 +241,15 @@ class ActorCritic(nn.Module):
     pi: Actor
     v: nn.Module
 
-    def step(self, obs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def step(
+        self, obs: torch.Tensor, action_mask: torch.Tensor | None = None
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         raise NotImplementedError
 
-    def act(self, obs: torch.Tensor) -> torch.Tensor:
-        return self.step(obs)[0]
+    def act(
+        self, obs: torch.Tensor, action_mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        return self.step(obs, action_mask)[0]
 
 
 class MLPActorCritic(ActorCritic):
@@ -265,10 +282,12 @@ class MLPActorCritic(ActorCritic):
         # Value function
         self.v = MLPCritic(obs_dim, hidden_sizes, activation)
 
-    def step(self, obs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def step(
+        self, obs: torch.Tensor, action_mask: torch.Tensor | None = None
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 
         with torch.no_grad():
-            pi = self.pi._distribution(obs)
+            pi = self.pi._distribution(obs, action_mask)
             a = pi.sample()
             logp_a = self.pi._log_prob_from_distribution(pi, a)
             v: torch.Tensor = self.v(obs)

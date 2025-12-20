@@ -2,6 +2,9 @@ from typing import Callable
 import numpy as np
 
 Transition = tuple[np.ndarray, np.ndarray, float, float, float, bool]
+TransitionWithMask = tuple[
+    np.ndarray, np.ndarray, float, float, float, bool, np.ndarray | None
+]
 
 
 class RolloutBuffer:
@@ -15,8 +18,12 @@ class RolloutBuffer:
         self.clear()
         self.postprocess_fn = postprocess_fn
 
-    def add(self, transition: Transition) -> None:
-        state, action, reward, log_prob, value, done = transition
+    def add(self, transition: Transition | TransitionWithMask) -> None:
+        if len(transition) == 6:
+            state, action, reward, log_prob, value, done = transition
+            action_mask = None
+        else:
+            state, action, reward, log_prob, value, done, action_mask = transition
 
         self.current_states.append(state)
         self.current_actions.append(action)
@@ -24,6 +31,8 @@ class RolloutBuffer:
         self.current_log_probs.append(log_prob)
         self.current_values.append(value)
         self.current_dones.append(done)
+        if action_mask is not None:
+            self.current_action_masks.append(action_mask)
 
     def end_episode(self) -> None:
         episode = {
@@ -34,6 +43,9 @@ class RolloutBuffer:
             "values": np.array(self.current_values),
             "dones": np.array(self.current_dones),
         }
+        if self.current_action_masks:
+            episode["action_masks"] = np.array(self.current_action_masks)
+
         episode = self.postprocess_fn(episode) if self.postprocess_fn else episode
         self.trajectories.append(episode)
 
@@ -43,6 +55,7 @@ class RolloutBuffer:
         self.current_log_probs = []
         self.current_values = []
         self.current_dones = []
+        self.current_action_masks = []
 
     def get(self) -> list[dict[str, np.ndarray]]:
         return self.trajectories
@@ -56,6 +69,7 @@ class RolloutBuffer:
         self.current_log_probs: list[float] = []
         self.current_values: list[float] = []
         self.current_dones: list[bool] = []
+        self.current_action_masks: list[np.ndarray] = []
 
     def __len__(self) -> int:
         return len(self.trajectories)
